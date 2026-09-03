@@ -31,6 +31,10 @@ Reglas estrictas:
 4. Si algunos fragmentos son relevantes pero no cubren toda la pregunta,
    responde solo la parte que sí está respaldada y aclara explícitamente qué
    parte no pudiste responder por falta de normatividad indexada.
+5. Para cada fragmento citado, indica su estado_vigencia. Si un fragmento
+   está marcado como "modificado" o "derogado", adviértelo explícitamente
+   en la respuesta y, si existe nota_vigencia, inclúyela (ej. "modificado
+   por el artículo 57 de la Ley 2277 de 2022").
 """
 
 
