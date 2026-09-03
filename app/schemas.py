@@ -22,3 +22,21 @@ class NormaRead(NormaBase):
 
     id: int
     fecha_ingesta: datetime
+
+
+class ConsultaRequest(BaseModel):
+    pregunta: str
+
+
+class FuenteCitada(BaseModel):
+    id: int
+    tipo_norma: str
+    numero_articulo: str | None = None
+    fuente: str
+    url_fuente: str | None = None
+    estado_vigencia: str
+
+
+class ConsultaResponse(BaseModel):
+    respuesta: str
+    fuentes: list[FuenteCitada]

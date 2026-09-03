@@ -6,10 +6,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
-# Dimensión del embedding: ajustar según el modelo de embeddings que se use
-# (Anthropic no expone un endpoint de embeddings propio; ej. Voyage AI usa 1024,
-# OpenAI text-embedding-3-small usa 1536).
-EMBEDDING_DIM = 1536
+# Dimensión del embedding: Anthropic no expone un endpoint de embeddings propio,
+# así que se usa Voyage AI (partner recomendado por Anthropic). El modelo por
+# defecto (ver app/embeddings.py, VOYAGE_EMBEDDING_MODEL) genera vectores de
+# 1024 dimensiones. Si se cambia de modelo/dimensión hay que actualizar esta
+# constante y la migración correspondiente.
+EMBEDDING_DIM = 1024
 
 
 class Norma(Base):
