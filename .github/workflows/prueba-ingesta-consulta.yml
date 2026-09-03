@@ -1,0 +1,27 @@
+name: Prueba ingesta + consulta (artículo 420 ET)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prueba:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt httpx
+
+      - name: Correr migraciones (alembic upgrade head)
+        run: alembic upgrade head
+
+      - name: Ingesta de norma de prueba + consultas RAG
+        run: python scripts/prueba_ingesta_consulta.py
