@@ -1,3 +1,5 @@
+import os
+
 import anthropic
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -101,7 +103,7 @@ def responder_pregunta(db: Session, pregunta: str) -> dict:
         f'exactamente: "{MENSAJE_SIN_NORMATIVIDAD}"'
     )
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=os.environ["APP_ANTHROPIC_API_KEY"])
     response = client.messages.parse(
         model=MODEL_ID,
         max_tokens=4096,
