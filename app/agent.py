@@ -103,7 +103,7 @@ def responder_pregunta(db: Session, pregunta: str) -> dict:
         f'exactamente: "{MENSAJE_SIN_NORMATIVIDAD}"'
     )
 
-    client = anthropic.Anthropic(api_key=os.environ["APP_ANTHROPIC_API_KEY"])
+    client = anthropic.Anthropic(api_key=os.environ["CLAUDE_LLM_API_KEY"])
     response = client.messages.parse(
         model=MODEL_ID,
         max_tokens=4096,
