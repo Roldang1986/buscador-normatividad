@@ -1,17 +1,41 @@
 ARTÍCULO 420. HECHOS SOBRE LOS QUE RECAE EL IMPUESTO. El impuesto a las ventas se aplicará sobre:
 
-a) La venta de bienes corporales muebles e inmuebles, con excepción de los expresamente excluidos;
+a) La venta de bienes corporales muebles e inmuebles, con excepción de los expresamente excluidos.
 
-b) La venta o cesiones de derechos sobre activos intangibles, únicamente asociados con la propiedad industrial;
+b) La venta o cesiones de derechos sobre activos intangibles, únicamente asociados con la propiedad industrial.
 
-c) La prestación de servicios en el territorio nacional, o desde el exterior, con excepción de los expresamente excluidos;
+c) La prestación de servicios en el territorio nacional, o desde el exterior, con excepción de los expresamente excluidos.
 
-d) La importación de bienes corporales que no hayan sido excluidos expresamente;
+d) La importación de bienes corporales que no hayan sido excluidos expresamente.
 
-e) La circulación, venta u operación de juegos de suerte y azar con excepción de las loterías y de los juegos de suerte y azar operados exclusivamente por internet.
+e) La circulación, venta u operación de juegos de suerte y azar, con excepción de las loterías y de los juegos de suerte y azar operados exclusivamente por internet.
 
-PARÁGRAFO 1o. El impuesto no se aplicará a las ventas de activos fijos, salvo que se trate de los casos previstos para bienes inmuebles en las excepciones consagradas en este Estatuto, ni tampoco a las ventas de yates, aviones, aeronaves y helicópteros de recreo o de deporte.
+El impuesto a las ventas en los juegos de suerte y azar se causa en el momento de realización de la apuesta, expedición del documento, formulario, boleta o instrumento que da derecho a participar en el juego. Es responsable del impuesto el operador del juego.
 
-PARÁGRAFO 2o. Los juegos de suerte y azar operados exclusivamente por internet, cuyas apuestas se hagan desde Colombia, están excluidos del impuesto sobre las ventas.
+La base gravable del impuesto sobre las ventas en los juegos de suerte y azar estará constituida por el valor de la apuesta, y del documento, formulario, boleta, billete o instrumento que da derecho a participar en el juego. En el caso de los juegos localizados tales como las maquinitas o tragamonedas, la base gravable mensual está constituida por el valor correspondiente a veinte (20) Unidades de Valor Tributario (UVT) y la de las mesas de juegos estará constituida por el valor correspondiente a doscientos noventa (290) Unidades de Valor Tributario (UVT).
 
-PARÁGRAFO 3o. La venta e importación de cigarrillos y tabaco elaborado, nacional y extranjero está sometida a la tarifa general del impuesto sobre las ventas -IVA-.
+En el caso de las máquinas electrónicas tragamonedas que operan en locales cuya actividad comercial principal puede ser diferente a juegos de suerte y azar, la base gravable está constituida por el valor correspondiente a diez (10) Unidades de Valor Tributario (UVT). En el caso de los juegos de bingo, la base gravable mensual está constituida por el valor correspondiente a tres (3) Unidades de Valor Tributario (UVT) por cada silla. Para los demás juegos localizados señalados en el numeral 5 del artículo 34 de la Ley 643 de 2001, la base gravable mensual será el valor correspondiente a diez (10) Unidades de Valor Tributario (UVT).
+
+En los juegos de suerte y azar se aplicará la tarifa general del impuesto sobre las ventas prevista en este Estatuto.
+
+Son documentos equivalentes a la factura en los juegos de suerte y azar, la boleta, el formulario, billete o documento que da derecho a participar en el juego. Cuando para participar en el juego no se requiera documento, se deberá expedir factura o documento equivalente. El valor del impuesto sobre las ventas a cargo del responsable no forma parte del valor de la apuesta.
+
+El impuesto generado por concepto de juegos de suerte y azar se afectará con impuestos descontables.
+
+PARÁGRAFO 1o. El impuesto no se aplicará a las ventas de activos fijos, salvo que se trate de las excepciones previstas para los bienes inmuebles de uso residencial, automotores y demás activos fijos que se vendan habitualmente a nombre y por cuenta de terceros y para los aerodinos.
+
+PARÁGRAFO 2o. Para la prestación de servicios en el territorio nacional se aplicarán las siguientes reglas:
+
+1. Los servicios relacionados con bienes inmuebles se entenderán prestados en el lugar de su ubicación.
+
+2. Los siguientes servicios se entenderán prestados en el lugar donde se realicen materialmente:
+
+a) Los de carácter cultural, artístico, así como los relativos a la organización de los mismos.
+
+b) Los de carga y descarga, trasbordo y almacenaje.
+
+PARÁGRAFO 3o. Para efectos del impuesto sobre las ventas, los servicios prestados y los intangibles adquiridos o licenciados desde el exterior se entenderán prestados, licenciados o adquiridos en el territorio nacional y causarán el respectivo impuesto cuando el usuario directo o destinatario de los mismos tenga su residencia fiscal, domicilio, establecimiento permanente, o la sede de su actividad económica en el territorio nacional.
+
+PARÁGRAFO 4o. Lo dispuesto en el presente artículo no será aplicable a los servicios de reparación y mantenimiento en naves y aeronaves prestados en el exterior, así como a los arrendamientos de naves, aeronaves y demás bienes muebles destinados al servicio de transporte internacional, por empresas dedicadas a esa actividad.
+
+PARÁGRAFO 5o. La venta e importación de cigarrillos y tabaco elaborado, nacional y extranjero, estará gravada a la tarifa general. El impuesto generado por estos conceptos, dará derecho a impuestos descontables en los términos del artículo 485 de este Estatuto.

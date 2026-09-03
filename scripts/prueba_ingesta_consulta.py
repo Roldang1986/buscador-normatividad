@@ -5,11 +5,8 @@ Se ejecuta desde el workflow de GitHub Actions
 `alembic upgrade head` corrido y DATABASE_URL / ANTHROPIC_API_KEY /
 VOYAGE_API_KEY disponibles en el entorno.
 
-IMPORTANTE: el texto en scripts/data/articulo_420_et.txt es una
-reconstrucción hecha sin acceso a normograma.dian.gov.co (el proxy de red de
-la sesión que lo generó bloqueó ese dominio y otras fuentes legales
-alternativas). Verifica el texto contra la fuente oficial antes de tratar
-este resultado como una prueba definitiva.
+El texto en scripts/data/articulo_420_et.txt fue verificado por el usuario
+contra Secretaría del Senado, un oficio de la DIAN y estatuto.co.
 """
 
 import json
@@ -27,7 +24,7 @@ NORMA_PRUEBA = {
     "fuente": "Estatuto Tributario, artículo 420",
     "texto": (DATA_DIR / "articulo_420_et.txt").read_text(encoding="utf-8").strip(),
     "estado_vigencia": "vigente",
-    "url_fuente": "https://normograma.dian.gov.co/dian/compilacion/docs/estatuto_tributario.htm",
+    "url_fuente": "https://estatuto.co/420",
 }
 
 PREGUNTA_INDEXADA = "¿qué operaciones están gravadas con IVA según el Estatuto Tributario?"
