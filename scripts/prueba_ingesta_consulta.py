@@ -14,7 +14,9 @@ import pathlib
 
 from starlette.testclient import TestClient
 
+from app.database import SessionLocal
 from app.main import app
+from app.models import Norma
 
 DATA_DIR = pathlib.Path(__file__).parent / "data"
 
@@ -39,12 +41,36 @@ def _imprimir(titulo: str, payload: dict) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
 
 
+def _norma_ya_existe() -> bool:
+    db = SessionLocal()
+    try:
+        return (
+            db.query(Norma)
+            .filter(
+                Norma.tipo_norma == NORMA_PRUEBA["tipo_norma"],
+                Norma.numero_articulo == NORMA_PRUEBA["numero_articulo"],
+            )
+            .first()
+            is not None
+        )
+    finally:
+        db.close()
+
+
 def main() -> None:
     client = TestClient(app)
 
-    resp = client.post("/ingesta/norma", json=NORMA_PRUEBA)
-    resp.raise_for_status()
-    _imprimir("POST /ingesta/norma", resp.json())
+    if _norma_ya_existe():
+        print(
+            "\n=== POST /ingesta/norma ===\n"
+            "(omitido: ya existe una norma con "
+            f"tipo_norma={NORMA_PRUEBA['tipo_norma']!r} "
+            f"numero_articulo={NORMA_PRUEBA['numero_articulo']!r}, no se duplica)"
+        )
+    else:
+        resp = client.post("/ingesta/norma", json=NORMA_PRUEBA)
+        resp.raise_for_status()
+        _imprimir("POST /ingesta/norma", resp.json())
 
     resp = client.post("/consulta", json={"pregunta": PREGUNTA_INDEXADA})
     resp.raise_for_status()
