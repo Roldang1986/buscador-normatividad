@@ -1,23 +1,25 @@
 """Scraper de normograma.dian.gov.co: descubre e ingiere normas tributarias.
 
-IMPORTANTE — escrito sin poder inspeccionar el DOM real del sitio en vivo:
-el proxy de red de la sesión de Claude Code que escribió este módulo
-bloquea normograma.dian.gov.co, así que los selectores de Playwright de
-`descubrir_urls_seccion` son la mejor suposición a partir de la
-descripción del usuario (quien sí inspeccionó el sitio con acceso real) y
-no una implementación verificada contra el HTML/DOM reales. Lo mismo
-aplica a las heurísticas de `_extraer_articulos` y `_estado_y_nota_vigencia`
-para todos los tipos de documento distintos al artículo 420 del Estatuto
-Tributario (ese sí se validó manualmente). Está pensado para ajustarse con
-lo que reporte el primer run real del workflow scraper-dian.yml sobre un
-subconjunto pequeño, antes de intentar una ingesta masiva.
+IMPORTANTE — escrito sin poder inspeccionar el DOM real del sitio en vivo
+desde esta sesión: el proxy de red de este entorno de Claude Code bloquea
+normograma.dian.gov.co, así que todo lo de abajo viene de lo que el
+usuario reportó tras inspeccionar el sitio con acceso real (fuera de esta
+sesión) y de un primer run de prueba fallido que sirvió de diagnóstico —
+no de verificación directa por quien escribió este código. Sigue habiendo
+partes heurísticas sin validar (marcadas AJUSTAR), sobre todo
+`_extraer_articulos` y `_estado_y_nota_vigencia` para documentos distintos
+al artículo 420 del Estatuto Tributario (ese sí se validó manualmente).
 
 Confirmado con acceso real al sitio (no heurístico):
-- Los enlaces a documentos individuales dentro de las secciones "Ver Más"
-  de las páginas de índice no están en el HTML crudo; requieren expandir
-  la sección con JavaScript (de ahí el uso de Playwright solo para esta
-  parte).
-- Los documentos individuales sí son HTML plano, con enlaces cruzados a
+- URL del índice tributario: t_1_normativa_tributaria.html cuelga
+  directamente de /dian/compilacion/, sin /docs/ ni query params.
+- El encabezado de cada sección (ej. "1.1. Estatuto Tributario") sí está
+  en el HTML estático — no requiere esperar a JavaScript para aparecer.
+- Los enlaces a documentos individuales SÍ requieren expandir la sección
+  primero (de ahí el uso de Playwright solo para esta parte): el control
+  para expandir es un ÍCONO (<img alt="Ver Más">) cercano al encabezado,
+  no un nodo de texto "Ver Más".
+- Los documentos individuales son HTML plano, con enlaces cruzados a
   otras normas por nombre de archivo (ej. ley_2068_2020.htm,
   decreto_1742_2020.htm) y anclas a artículos específicos
   (ej. estatuto_tributario.htm#420).
@@ -41,8 +43,12 @@ from app.models import Norma
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://normograma.dian.gov.co/dian/compilacion/docs/"
-INDEX_URL = BASE_URL + "t_1_normativa_tributaria.html"
+DOMINIO = "normograma.dian.gov.co"
+INDEX_URL = "https://normograma.dian.gov.co/dian/compilacion/t_1_normativa_tributaria.html"
+
+# Patrón del ícono "Ver Más": es una <img alt="Ver Más">, no un nodo de
+# texto — confirmado con acceso real al sitio.
+VER_MAS_ALT_RE = re.compile(r"ver\s*m[aá]s", re.IGNORECASE)
 
 USER_AGENT = "buscador-normatividad-bot/0.1 (+ingesta de normatividad tributaria publica)"
 REQUEST_DELAY_SECONDS = 1.0
@@ -139,16 +145,36 @@ def _estado_y_nota_vigencia(texto_articulo: str) -> tuple[str, str | None]:
     return "modificado", nota
 
 
+def _localizar_icono_ver_mas(seccion_heading):
+    """Sube por los ancestros del encabezado de sección hasta encontrar el
+    ícono "Ver Más" (una <img alt="Ver Más">, no un nodo de texto) más
+    cercano, y devuelve (icono, contenedor) donde `contenedor` es el
+    ancestro en el que se encontró — se reutiliza luego para extraer los
+    enlaces que aparecen tras expandir esa sección específica.
+
+    Camina nivel por nivel en vez de fijar una profundidad concreta porque
+    no se pudo verificar en vivo si el ícono es hermano directo del
+    encabezado o cuelga de un ancestro un poco más arriba.
+    """
+    for nivel in range(1, 6):
+        contenedor = seccion_heading.locator(f"xpath=ancestor::*[{nivel}]")
+        icono = contenedor.get_by_alt_text(VER_MAS_ALT_RE)
+        if icono.count() >= 1:
+            return icono.first, contenedor
+    return None, None
+
+
 def descubrir_urls_seccion(
     seccion_titulo: str, limite: int | None = None
 ) -> list[DocumentoDescubierto]:
     """Usa Playwright para expandir "Ver Más" en una sección del índice
     tributario y devolver las URLs de documentos individuales encontradas.
 
-    AJUSTAR: los selectores de abajo son la mejor suposición sobre la
-    estructura del índice; validar contra el DOM real en el primer run y
-    corregir el `xpath` del contenedor y el texto de "Ver Más" si no
-    encuentran nada.
+    AJUSTAR: aunque la URL del índice y el hallazgo de que "Ver Más" es un
+    ícono (no texto) ya se confirmaron con acceso real al sitio, el
+    xpath de búsqueda de ancestros sigue siendo una aproximación genérica
+    — validar contra el DOM real si este segundo intento tampoco encuentra
+    el ícono.
     """
     documentos: list[DocumentoDescubierto] = []
     with sync_playwright() as p:
@@ -159,21 +185,20 @@ def descubrir_urls_seccion(
 
         seccion_heading = page.get_by_text(seccion_titulo, exact=False).first
         seccion_heading.wait_for(state="visible")
-        contenedor = seccion_heading.locator(
-            "xpath=ancestor::*[self::li or self::div or self::section][1]"
-        )
 
-        ver_mas = contenedor.get_by_text(re.compile(r"ver\s*m[aá]s", re.IGNORECASE))
-        if ver_mas.count() > 0:
-            ver_mas.first.click()
+        icono, contenedor = _localizar_icono_ver_mas(seccion_heading)
+        if icono is not None:
+            icono.click()
             page.wait_for_timeout(1500)
         else:
             logger.warning(
-                "No se encontró botón 'Ver Más' para la sección %r; puede "
-                "que ya esté expandida o que el selector del contenedor "
-                "necesite ajuste.",
+                "No se encontró el ícono 'Ver Más' cerca del encabezado de "
+                "la sección %r tras revisar 5 niveles de ancestros; puede "
+                "que ya esté expandida o que la estructura real difiera "
+                "más de lo esperado.",
                 seccion_titulo,
             )
+            contenedor = seccion_heading.locator("xpath=ancestor::*[3]")
 
         enlaces = contenedor.locator("a")
         for i in range(enlaces.count()):
@@ -201,7 +226,6 @@ def descubrir_enlaces_cruzados(html: str, base_url: str) -> list[str]:
     """Extrae URLs de otras normas referenciadas dentro de un documento ya
     descargado (ej. ley_2068_2020.htm citada desde el Estatuto Tributario)."""
     soup = BeautifulSoup(html, "html.parser")
-    dominio_base = urlparse(BASE_URL).netloc
     urls: set[str] = set()
     for a in soup.find_all("a", href=True):
         href = a["href"]
@@ -209,7 +233,7 @@ def descubrir_enlaces_cruzados(html: str, base_url: str) -> list[str]:
             continue
         url_absoluta = urljoin(base_url, href).split("#")[0]
         parsed = urlparse(url_absoluta)
-        if parsed.netloc != dominio_base:
+        if parsed.netloc != DOMINIO:
             continue
         if DOC_LINK_RE.search(parsed.path):
             urls.add(url_absoluta)
