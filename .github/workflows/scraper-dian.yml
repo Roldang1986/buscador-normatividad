@@ -1,0 +1,43 @@
+name: Scraper DIAN (prueba)
+
+on:
+  workflow_dispatch:
+    inputs:
+      seccion:
+        description: "Texto del encabezado de la sección del índice a scrapear"
+        required: false
+        default: "1.1. Estatuto Tributario"
+      limite:
+        description: "Máximo de documentos a descubrir en la sección"
+        required: false
+        default: "3"
+
+jobs:
+  scraper:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Instalar navegador de Playwright
+        run: playwright install --with-deps chromium
+
+      - name: Correr migraciones (alembic upgrade head)
+        run: alembic upgrade head
+
+      - name: Scraper DIAN (subconjunto de prueba)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          SECCION: ${{ github.event.inputs.seccion }}
+          LIMITE: ${{ github.event.inputs.limite }}
+        run: python scripts/run_dian_scraper.py "$SECCION" --limite "$LIMITE"
