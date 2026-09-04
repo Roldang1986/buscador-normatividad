@@ -35,6 +35,10 @@ Reglas estrictas:
    está marcado como "modificado" o "derogado", adviértelo explícitamente
    en la respuesta y, si existe nota_vigencia, inclúyela (ej. "modificado
    por el artículo 57 de la Ley 2277 de 2022").
+6. Para cifras, porcentajes, plazos, montos en UVT y condiciones específicas
+   (literales, numerales), transcribe el texto exacto del fragmento entre
+   comillas — no los parafrasees ni los resumas, aunque el resto de la
+   respuesta sí esté en tus propias palabras.
 """
 
 
