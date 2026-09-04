@@ -25,3 +25,5 @@ jobs:
 
       - name: Ingesta de norma de prueba + consultas RAG
         run: python scripts/prueba_ingesta_consulta.py
+        env:
+          PYTHONPATH: ${{ github.workspace }}
