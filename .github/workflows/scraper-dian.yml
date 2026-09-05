@@ -11,6 +11,10 @@ on:
         description: "Máximo de documentos a descubrir en la sección"
         required: false
         default: "3"
+      limite_fragmentos_por_documento:
+        description: "Máximo de fragmentos (artículos) a insertar por cada documento individual (vacío = sin límite). Necesario para documentos consolidados grandes como el Estatuto Tributario compilado."
+        required: false
+        default: ""
       limpiar_truncados:
         description: "Borrar antes de scrapear las normas con numero_articulo truncado en un guión (bug de ARTICULO_HEADER_RE ya corregido)"
         required: false
@@ -55,11 +59,15 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           SECCION: ${{ github.event.inputs.seccion }}
           LIMITE: ${{ github.event.inputs.limite }}
+          LIMITE_FRAGMENTOS: ${{ github.event.inputs.limite_fragmentos_por_documento }}
           LIMPIAR_TRUNCADOS: ${{ github.event.inputs.limpiar_truncados }}
           SOLO_VERIFICAR: ${{ github.event.inputs.solo_verificar_numeracion }}
           SOLO_DESCUBRIR: ${{ github.event.inputs.solo_descubrir }}
         run: |
           ARGS=(scripts/run_dian_scraper.py "$SECCION" --limite "$LIMITE" --capturas-dir scraper-debug)
+          if [ -n "$LIMITE_FRAGMENTOS" ]; then
+            ARGS+=(--limite-fragmentos-por-documento "$LIMITE_FRAGMENTOS")
+          fi
           if [ "$LIMPIAR_TRUNCADOS" = "true" ]; then
             ARGS+=(--limpiar-truncados)
           fi

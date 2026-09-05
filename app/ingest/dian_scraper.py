@@ -520,7 +520,10 @@ def verificar_numeracion_articulos(db: Session) -> dict:
 
 
 def ingestar_documento(
-    db: Session, url: str, indice_marca_derogado: bool | None = None
+    db: Session,
+    url: str,
+    indice_marca_derogado: bool | None = None,
+    limite_fragmentos: int | None = None,
 ) -> tuple[int, list[str]]:
     """Descarga, parsea e inserta los fragmentos (artículos) de un
     documento. Devuelve (insertados, advertencias):
@@ -531,6 +534,15 @@ def ingestar_documento(
       el estado_vigencia inferido del texto de un artículo. Es solo una
       verificación cruzada: nunca sobrescribe estado_vigencia, que sigue
       viniendo del texto.
+
+    `limite_fragmentos`, si se pasa, trunca a los primeros N fragmentos
+    del documento antes de procesarlos — pensado para acotar el costo
+    (una llamada a Voyage + Anthropic por fragmento) al ingerir por
+    primera vez un documento consolidado grande como el Estatuto
+    Tributario compilado (~1000+ artículos en un solo documento), donde
+    `--limite` del descubrimiento no ayuda porque ese límite es sobre
+    cuántos DOCUMENTOS del índice se descubren, no sobre cuántos
+    fragmentos tiene cada uno.
 
     LIMITACIÓN CONOCIDA: `indice_marca_derogado` es una señal por
     DOCUMENTO (la fila del índice), no por artículo. Para documentos
@@ -545,6 +557,8 @@ def ingestar_documento(
     texto_completo = _texto_plano(html)
     tipo_norma = _tipo_norma_desde_url(url)
     fragmentos = _extraer_articulos(texto_completo)
+    if limite_fragmentos is not None:
+        fragmentos = fragmentos[:limite_fragmentos]
 
     insertados = 0
     advertencias: list[str] = []
@@ -597,11 +611,17 @@ def scrapear_seccion(
     limite_documentos: int | None = None,
     seguir_enlaces_cruzados: bool = False,
     directorio_capturas: str | None = None,
+    limite_fragmentos_por_documento: int | None = None,
 ) -> dict:
     """Punto de entrada: descubre documentos de una sección del índice
     tributario, los ingiere, y opcionalmente sigue sus enlaces cruzados
     como fuente adicional de descubrimiento (sin depender del buscador
-    propio del sitio)."""
+    propio del sitio).
+
+    `limite_fragmentos_por_documento` se pasa tal cual a cada llamada de
+    ingestar_documento (ver su docstring) — acota el costo por documento
+    individual, independiente de `limite_documentos` (que acota cuántos
+    documentos del índice se descubren, no el tamaño de cada uno)."""
     resumen: dict = {
         "seccion": seccion_titulo,
         "documentos_encontrados_en_indice": 0,
@@ -624,7 +644,10 @@ def scrapear_seccion(
         doc = pendientes.pop(0)
         try:
             insertados, advertencias = ingestar_documento(
-                db, doc.url, indice_marca_derogado=doc.indice_marca_derogado
+                db,
+                doc.url,
+                indice_marca_derogado=doc.indice_marca_derogado,
+                limite_fragmentos=limite_fragmentos_por_documento,
             )
             resumen["documentos_procesados"] += 1
             resumen["fragmentos_insertados"] += insertados
