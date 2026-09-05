@@ -12,6 +12,8 @@ import pathlib
 
 from app.database import SessionLocal
 from app.ingest.dian_scraper import (
+    contar_marca_derogado,
+    descubrir_urls_seccion,
     limpiar_numeros_articulo_truncados,
     scrapear_seccion,
     verificar_numeracion_articulos,
@@ -66,13 +68,47 @@ def main() -> None:
             "imprime el resultado. Ignora 'seccion' y '--limite'."
         ),
     )
+    parser.add_argument(
+        "--solo-descubrir",
+        action="store_true",
+        help=(
+            "No descarga ni inserta nada en la BD: solo corre el "
+            "descubrimiento en el índice (Playwright) sobre 'seccion' y "
+            "imprime los documentos encontrados (url, titulo, "
+            "indice_marca_derogado) y el conteo True/False/None de esa "
+            "señal. Usar junto con --capturas-dir para guardar también "
+            "capturas y el HTML del DOM antes/después del clic."
+        ),
+    )
     args = parser.parse_args()
 
     if not args.solo_verificar_numeracion and not args.seccion:
-        parser.error("'seccion' es obligatorio salvo con --solo-verificar-numeracion")
+        parser.error(
+            "'seccion' es obligatorio salvo con --solo-verificar-numeracion"
+        )
 
     if args.capturas_dir:
         pathlib.Path(args.capturas_dir).mkdir(parents=True, exist_ok=True)
+
+    if args.solo_descubrir:
+        documentos = descubrir_urls_seccion(
+            args.seccion, limite=args.limite, directorio_capturas=args.capturas_dir
+        )
+        resultado = {
+            "documentos_encontrados": len(documentos),
+            "conteo_marca_derogado": contar_marca_derogado(documentos),
+            "detalle": [
+                {
+                    "url": d.url,
+                    "titulo": d.titulo,
+                    "indice_marca_derogado": d.indice_marca_derogado,
+                }
+                for d in documentos
+            ],
+        }
+        print("\n=== Descubrimiento (solo lectura, no se insertó nada) ===")
+        print(json.dumps(resultado, indent=2, ensure_ascii=False))
+        return
 
     db = SessionLocal()
     try:
