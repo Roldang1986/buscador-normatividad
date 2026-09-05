@@ -71,6 +71,17 @@ jobs:
           fi
           python "${ARGS[@]}"
 
+      - name: Diagnóstico de DOM (solo lectura, sobre el HTML ya guardado)
+        if: always()
+        env:
+          SECCION: ${{ github.event.inputs.seccion }}
+        run: |
+          if [ -f "scraper-debug/01_antes_del_clic.html" ]; then
+            python scripts/diagnosticar_dom.py scraper-debug "$SECCION"
+          else
+            echo "No hay HTML guardado en scraper-debug/, se omite el diagnóstico."
+          fi
+
       - name: Subir capturas de diagnóstico
         if: always()
         uses: actions/upload-artifact@v4
