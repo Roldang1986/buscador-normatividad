@@ -30,6 +30,11 @@ on:
         required: false
         type: boolean
         default: false
+      diagnosticar_caso_vigencia:
+        description: "Diagnóstico de solo lectura para el caso confirmado ley_1943_2018.htm (INEXEQUIBLE, ícono rojo derogado): descarga el texto real para ver el patrón de vigencia, y compara el markup de su enlace contra uno vigente en el HTML ya volcado. No inserta nada en la BD."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   scraper:
@@ -88,6 +93,18 @@ jobs:
             python scripts/diagnosticar_dom.py scraper-debug "$SECCION"
           else
             echo "No hay HTML guardado en scraper-debug/, se omite el diagnóstico."
+          fi
+
+      - name: Diagnóstico de caso de vigencia (ley_1943_2018, INEXEQUIBLE)
+        if: always()
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DIAG_VIGENCIA: ${{ github.event.inputs.diagnosticar_caso_vigencia }}
+        run: |
+          if [ "$DIAG_VIGENCIA" = "true" ]; then
+            python scripts/diagnosticar_caso_vigencia.py scraper-debug
+          else
+            echo "diagnosticar_caso_vigencia=false, se omite."
           fi
 
       - name: Subir capturas de diagnóstico
