@@ -338,6 +338,45 @@ def limpiar_numeros_articulo_truncados(db: Session) -> int:
     return borrados
 
 
+def verificar_numeracion_articulos(db: Session) -> dict:
+    """Diagnóstico puntual post-corrección de ARTICULO_HEADER_RE:
+
+    - truncados_restantes: filas con numero_articulo terminado en guión
+      (debería ser 0; si no lo es, algo sigue sin corregirse).
+    - articulos_631: lista los numero_articulo que empiezan con "631-",
+      para confirmar directamente que 631-1..631-6 quedaron como
+      registros distintos en vez de colapsados en uno solo.
+    - con_letras_no_ordinales: numero_articulo que contienen alguna letra
+      fuera del sufijo ordinal esperado ("...o", ej. "5o", "631-1o" no
+      existe pero "5o" sí) — para detectar patrones de numeración no
+      cubiertos por el regex actual (ej. sufijos de letra tipo "20A").
+    """
+    truncados = db.query(Norma).filter(Norma.numero_articulo.like("%-")).count()
+
+    articulos_631 = [
+        n.numero_articulo
+        for n in db.query(Norma)
+        .filter(Norma.numero_articulo.like("631-%"))
+        .order_by(Norma.numero_articulo)
+        .all()
+    ]
+
+    con_letras_no_ordinales = [
+        n.numero_articulo
+        for n in db.query(Norma)
+        .filter(Norma.numero_articulo.op("~")("[A-Za-zÀ-ÿ]"))
+        .filter(~Norma.numero_articulo.op("~")(r"^[0-9]+(-[0-9]+)*o$"))
+        .order_by(Norma.numero_articulo)
+        .all()
+    ]
+
+    return {
+        "truncados_restantes": truncados,
+        "articulos_631": articulos_631,
+        "numero_articulo_con_letras_no_ordinales": con_letras_no_ordinales,
+    }
+
+
 def ingestar_documento(db: Session, url: str) -> int:
     """Descarga, parsea e inserta los fragmentos (artículos) de un
     documento. Devuelve cuántos fragmentos nuevos insertó (0 si ya

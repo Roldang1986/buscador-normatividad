@@ -11,7 +11,11 @@ import logging
 import pathlib
 
 from app.database import SessionLocal
-from app.ingest.dian_scraper import limpiar_numeros_articulo_truncados, scrapear_seccion
+from app.ingest.dian_scraper import (
+    limpiar_numeros_articulo_truncados,
+    scrapear_seccion,
+    verificar_numeracion_articulos,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -19,7 +23,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "seccion", help="Texto del encabezado de la sección del índice a scrapear"
+        "seccion",
+        nargs="?",
+        default=None,
+        help="Texto del encabezado de la sección del índice a scrapear",
     )
     parser.add_argument(
         "--limite",
@@ -50,13 +57,31 @@ def main() -> None:
             "de ARTICULO_HEADER_RE anterior a la corrección."
         ),
     )
+    parser.add_argument(
+        "--solo-verificar-numeracion",
+        action="store_true",
+        help=(
+            "No scrapea nada: solo corre el diagnóstico de "
+            "verificar_numeracion_articulos() sobre la BD actual e "
+            "imprime el resultado. Ignora 'seccion' y '--limite'."
+        ),
+    )
     args = parser.parse_args()
+
+    if not args.solo_verificar_numeracion and not args.seccion:
+        parser.error("'seccion' es obligatorio salvo con --solo-verificar-numeracion")
 
     if args.capturas_dir:
         pathlib.Path(args.capturas_dir).mkdir(parents=True, exist_ok=True)
 
     db = SessionLocal()
     try:
+        if args.solo_verificar_numeracion:
+            diagnostico = verificar_numeracion_articulos(db)
+            print("\n=== Diagnóstico de numeración de artículos ===")
+            print(json.dumps(diagnostico, indent=2, ensure_ascii=False))
+            return
+
         if args.limpiar_truncados:
             borrados = limpiar_numeros_articulo_truncados(db)
             print(f"Borrados {borrados} fragmentos con numero_articulo truncado.")

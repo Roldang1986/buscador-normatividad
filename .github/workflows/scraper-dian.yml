@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      solo_verificar_numeracion:
+        description: "No scrapear nada: solo imprimir el diagnóstico de numeración de artículos (truncados restantes, artículos 631-*, numero_articulo con letras no ordinales)"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   scraper:
@@ -46,10 +51,14 @@ jobs:
           SECCION: ${{ github.event.inputs.seccion }}
           LIMITE: ${{ github.event.inputs.limite }}
           LIMPIAR_TRUNCADOS: ${{ github.event.inputs.limpiar_truncados }}
+          SOLO_VERIFICAR: ${{ github.event.inputs.solo_verificar_numeracion }}
         run: |
           ARGS=(scripts/run_dian_scraper.py "$SECCION" --limite "$LIMITE" --capturas-dir scraper-debug)
           if [ "$LIMPIAR_TRUNCADOS" = "true" ]; then
             ARGS+=(--limpiar-truncados)
+          fi
+          if [ "$SOLO_VERIFICAR" = "true" ]; then
+            ARGS+=(--solo-verificar-numeracion)
           fi
           python "${ARGS[@]}"
 
