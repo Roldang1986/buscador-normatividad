@@ -8,6 +8,7 @@ Uso:
 import argparse
 import json
 import logging
+import pathlib
 
 from app.database import SessionLocal
 from app.ingest.dian_scraper import scrapear_seccion
@@ -31,7 +32,19 @@ def main() -> None:
         action="store_true",
         help="Además de la sección, sigue los enlaces cruzados dentro de cada documento",
     )
+    parser.add_argument(
+        "--capturas-dir",
+        default=None,
+        help=(
+            "Directorio donde guardar capturas de pantalla de diagnóstico "
+            "(antes/después del clic en 'Ver Más'). Si no se pasa, no se "
+            "toman capturas."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.capturas_dir:
+        pathlib.Path(args.capturas_dir).mkdir(parents=True, exist_ok=True)
 
     db = SessionLocal()
     try:
@@ -40,6 +53,7 @@ def main() -> None:
             seccion_titulo=args.seccion,
             limite_documentos=args.limite,
             seguir_enlaces_cruzados=args.seguir_enlaces_cruzados,
+            directorio_capturas=args.capturas_dir,
         )
     finally:
         db.close()
