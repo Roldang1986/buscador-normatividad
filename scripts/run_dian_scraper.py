@@ -11,7 +11,7 @@ import logging
 import pathlib
 
 from app.database import SessionLocal
-from app.ingest.dian_scraper import scrapear_seccion
+from app.ingest.dian_scraper import limpiar_numeros_articulo_truncados, scrapear_seccion
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -41,6 +41,15 @@ def main() -> None:
             "toman capturas."
         ),
     )
+    parser.add_argument(
+        "--limpiar-truncados",
+        action="store_true",
+        help=(
+            "Antes de scrapear, borra normas con numero_articulo truncado "
+            "en un guión (ej. '631-' en vez de '631-1') dejadas por el bug "
+            "de ARTICULO_HEADER_RE anterior a la corrección."
+        ),
+    )
     args = parser.parse_args()
 
     if args.capturas_dir:
@@ -48,6 +57,10 @@ def main() -> None:
 
     db = SessionLocal()
     try:
+        if args.limpiar_truncados:
+            borrados = limpiar_numeros_articulo_truncados(db)
+            print(f"Borrados {borrados} fragmentos con numero_articulo truncado.")
+
         resumen = scrapear_seccion(
             db,
             seccion_titulo=args.seccion,
