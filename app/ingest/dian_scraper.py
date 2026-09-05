@@ -18,11 +18,21 @@ Confirmado con acceso real al sitio (no heurístico):
 - Los enlaces a documentos individuales SÍ requieren expandir la sección
   primero (de ahí el uso de Playwright solo para esta parte): el control
   para expandir es un ÍCONO (<img alt="Ver Más">) cercano al encabezado,
-  no un nodo de texto "Ver Más". Confirmado con capturas de pantalla que
-  el clic sí expande la sección visualmente, pero los enlaces resultantes
-  no quedan anidados dentro de ningún ancestro cercano al encabezado/
-  ícono — por eso `descubrir_urls_seccion` compara los enlaces de toda la
-  página antes/después del clic en vez de acotar a un contenedor.
+  no un nodo de texto "Ver Más".
+- Confirmado con un dump real del DOM (antes/después del clic, analizado
+  con scripts/diagnosticar_dom.py sobre un run real) que el contenedor
+  que aísla exactamente la sección es el ancestro más cercano al
+  encabezado con clase "opcion-nueva": antes del clic tiene 0 enlaces a
+  documentos dentro, y después del clic tiene exactamente los enlaces
+  revelados por esa sección (mismo conteo que el total de enlaces nuevos
+  de toda la página en la prueba real), incluido el enlace al documento
+  compilado del Estatuto Tributario — que antes de esa prueba se perdía
+  porque solo aparece tras el clic (no es que exista desde antes y el
+  diff de "solo lo nuevo" lo excluyera). Los ancestros más cercanos
+  (título de la sección y su envoltorio inmediato) NO sirven como
+  contenedor: se quedan en 0 enlaces incluso después del clic, porque el
+  contenido revelado es hermano del título, no descendiente de un
+  ancestro más próximo.
 - Los documentos individuales son HTML plano, con enlaces cruzados a
   otras normas por nombre de archivo (ej. ley_2068_2020.htm,
   decreto_1742_2020.htm) y anclas a artículos específicos
@@ -218,14 +228,35 @@ def _detectar_marca_derogado(elemento_enlace) -> bool | None:
     return False
 
 
-def _enlaces_documento_en_pagina(page) -> dict[str, dict]:
+def _localizar_contenedor_opcion(seccion_heading):
+    """Ancestro más cercano al encabezado de sección con clase
+    "opcion-nueva". Confirmado con un dump real del DOM (ver
+    scripts/diagnosticar_dom.py) que es el contenedor que aísla
+    exactamente la sección: 0 enlaces a documentos antes del clic en
+    "Ver Más", y solo los revelados por esa sección después — a
+    diferencia de los ancestros más cercanos (título, envoltorio
+    inmediato), que se quedan en 0 siempre porque el contenido revelado
+    es hermano del título, no descendiente suyo.
+
+    Devuelve None si no se encuentra (ej. estructura distinta en otra
+    sección), para que la llamada pueda decidir un fallback en vez de
+    fallar en seco."""
+    contenedor = seccion_heading.locator(
+        "xpath=ancestor::div["
+        "contains(concat(' ', normalize-space(@class), ' '), ' opcion-nueva ')"
+        "][last()]"
+    )
+    if contenedor.count() == 0:
+        return None
+    return contenedor.first
+
+
+def _enlaces_documento_en_pagina(alcance) -> dict[str, dict]:
     """Devuelve {href: {"titulo": str, "indice_marca_derogado": bool|None}}
-    de todos los <a href*=".htm"> de TODA la página, sin acotar a ningún
-    contenedor — confirmado con capturas de pantalla que el clic en "Ver
-    Más" sí expande la sección visualmente, pero los enlaces resultantes
-    no quedan anidados dentro de ningún ancestro cercano al encabezado/
-    ícono."""
-    enlaces = page.locator('a[href*=".htm"]')
+    de los <a href*=".htm"> dentro de `alcance` (un Locator de Playwright:
+    la página completa, o un contenedor ya acotado a la sección vía
+    _localizar_contenedor_opcion)."""
+    enlaces = alcance.locator('a[href*=".htm"]')
     resultado: dict[str, dict] = {}
     for i in range(enlaces.count()):
         el = enlaces.nth(i)
@@ -246,12 +277,14 @@ def descubrir_urls_seccion(
     """Usa Playwright para expandir "Ver Más" en una sección del índice
     tributario y devolver las URLs de documentos individuales encontradas.
 
-    Compara los enlaces a documentos (`a[href*=".htm"]`) de toda la página
-    antes y después del clic, y se queda con los que aparecen nuevos — en
-    vez de buscar dentro de un contenedor cercano al encabezado/ícono,
-    porque se confirmó (con capturas de un run anterior) que el clic sí
-    expande la sección visualmente pero los enlaces resultantes no quedan
-    anidados ahí.
+    Compara los enlaces a documentos (`a[href*=".htm"]`) antes y después
+    del clic, acotados al contenedor "opcion-nueva" ancestro del
+    encabezado de sección (ver _localizar_contenedor_opcion) — confirmado
+    con un dump real del DOM que ese contenedor aísla exactamente la
+    sección, sin mezclar enlaces de otras partes del índice. Si por algún
+    motivo no se encuentra ese contenedor (ej. estructura distinta en
+    otra sección no probada aún), cae de vuelta a comparar toda la
+    página y deja constancia con un warning — degradado pero no roto.
 
     Si se pasa `directorio_capturas`, guarda capturas de pantalla Y el HTML
     completo del DOM (antes/después del clic) — el HTML es lo que permite
@@ -268,6 +301,19 @@ def descubrir_urls_seccion(
         seccion_heading = page.get_by_text(seccion_titulo, exact=False).first
         seccion_heading.wait_for(state="visible")
 
+        contenedor = _localizar_contenedor_opcion(seccion_heading)
+        if contenedor is not None:
+            alcance = contenedor
+        else:
+            logger.warning(
+                "No se encontró el contenedor 'opcion-nueva' ancestro del "
+                "encabezado de la sección %r; usando toda la página como "
+                "alcance (menos preciso, puede mezclar enlaces de otras "
+                "secciones).",
+                seccion_titulo,
+            )
+            alcance = page
+
         if directorio_capturas:
             page.screenshot(
                 path=f"{directorio_capturas}/01_antes_del_clic.png", full_page=True
@@ -276,7 +322,7 @@ def descubrir_urls_seccion(
                 page.content(), encoding="utf-8"
             )
 
-        enlaces_antes = _enlaces_documento_en_pagina(page)
+        enlaces_antes = _enlaces_documento_en_pagina(alcance)
 
         icono = _localizar_icono_ver_mas(seccion_heading)
         if icono is not None:
@@ -292,25 +338,36 @@ def descubrir_urls_seccion(
                 seccion_titulo,
             )
 
-        # Sondea la página completa hasta 8s esperando que aparezcan
-        # enlaces nuevos (en vez de un contenedor o un sleep fijo).
+        # Sondea el contenedor (o la página, en el fallback) hasta 8s
+        # esperando enlaces nuevos, y espera a que el CONTEO se estabilice
+        # en dos sondeos consecutivos antes de aceptarlo como definitivo.
+        # No basta con romper apenas aparece el primer enlace nuevo: en un
+        # run real (limite=100) esa versión anterior capturó solo 2
+        # enlaces nuevos en el momento en que rompió el loop, mientras que
+        # el HTML volcado después (sin esa carrera) mostraba 212 enlaces
+        # nuevos ya renderizados en el contenedor — es decir, la condición
+        # de carrera capturaba una foto a medio renderizar del árbol de
+        # documentos, lo que explica por qué el conjunto de documentos
+        # encontrados variaba de forma no determinista entre corridas.
         deadline = time.time() + 8
         enlaces_nuevos: dict[str, dict] = {}
+        conteo_anterior = -1
         while time.time() < deadline:
-            enlaces_actuales = _enlaces_documento_en_pagina(page)
+            enlaces_actuales = _enlaces_documento_en_pagina(alcance)
             enlaces_nuevos = {
                 href: info
                 for href, info in enlaces_actuales.items()
                 if href not in enlaces_antes
             }
-            if enlaces_nuevos:
+            if enlaces_nuevos and len(enlaces_nuevos) == conteo_anterior:
                 break
+            conteo_anterior = len(enlaces_nuevos)
             page.wait_for_timeout(300)
 
         if not enlaces_nuevos:
             logger.warning(
-                "No aparecieron enlaces nuevos en toda la página tras el "
-                "clic (8s de espera)."
+                "No aparecieron enlaces nuevos en el alcance acotado tras "
+                "el clic (8s de espera)."
             )
         else:
             logger.info("Aparecieron %d enlaces nuevos tras el clic.", len(enlaces_nuevos))
