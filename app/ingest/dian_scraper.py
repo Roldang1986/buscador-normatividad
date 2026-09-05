@@ -18,7 +18,11 @@ Confirmado con acceso real al sitio (no heurístico):
 - Los enlaces a documentos individuales SÍ requieren expandir la sección
   primero (de ahí el uso de Playwright solo para esta parte): el control
   para expandir es un ÍCONO (<img alt="Ver Más">) cercano al encabezado,
-  no un nodo de texto "Ver Más".
+  no un nodo de texto "Ver Más". Confirmado con capturas de pantalla que
+  el clic sí expande la sección visualmente, pero los enlaces resultantes
+  no quedan anidados dentro de ningún ancestro cercano al encabezado/
+  ícono — por eso `descubrir_urls_seccion` compara los enlaces de toda la
+  página antes/después del clic en vez de acotar a un contenedor.
 - Los documentos individuales son HTML plano, con enlaces cruzados a
   otras normas por nombre de archivo (ej. ley_2068_2020.htm,
   decreto_1742_2020.htm) y anclas a artículos específicos
@@ -35,7 +39,6 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 from sqlalchemy.orm import Session
 
@@ -149,9 +152,7 @@ def _estado_y_nota_vigencia(texto_articulo: str) -> tuple[str, str | None]:
 def _localizar_icono_ver_mas(seccion_heading):
     """Sube por los ancestros del encabezado de sección hasta encontrar el
     ícono "Ver Más" (una <img alt="Ver Más">, no un nodo de texto) más
-    cercano, y devuelve (icono, contenedor) donde `contenedor` es el
-    ancestro en el que se encontró — se reutiliza luego para extraer los
-    enlaces que aparecen tras expandir esa sección específica.
+    cercano, y lo devuelve.
 
     Camina nivel por nivel en vez de fijar una profundidad concreta porque
     no se pudo verificar en vivo si el ícono es hermano directo del
@@ -161,8 +162,24 @@ def _localizar_icono_ver_mas(seccion_heading):
         contenedor = seccion_heading.locator(f"xpath=ancestor::*[{nivel}]")
         icono = contenedor.get_by_alt_text(VER_MAS_ALT_RE)
         if icono.count() >= 1:
-            return icono.first, contenedor
-    return None, None
+            return icono.first
+    return None
+
+
+def _enlaces_documento_en_pagina(page) -> dict[str, str]:
+    """Devuelve {href: texto_visible} de todos los <a href*=".htm"> de TODA
+    la página, sin acotar a ningún contenedor — confirmado con capturas de
+    pantalla que el clic en "Ver Más" sí expande la sección visualmente,
+    pero los enlaces resultantes no quedan anidados dentro de ningún
+    ancestro cercano al encabezado/ícono."""
+    enlaces = page.locator('a[href*=".htm"]')
+    resultado: dict[str, str] = {}
+    for i in range(enlaces.count()):
+        el = enlaces.nth(i)
+        href = el.get_attribute("href")
+        if href:
+            resultado.setdefault(href, (el.inner_text() or "").strip())
+    return resultado
 
 
 def descubrir_urls_seccion(
@@ -173,13 +190,15 @@ def descubrir_urls_seccion(
     """Usa Playwright para expandir "Ver Más" en una sección del índice
     tributario y devolver las URLs de documentos individuales encontradas.
 
-    Si se pasa `directorio_capturas`, guarda ahí capturas de pantalla antes
-    y después del clic (diagnóstico visual de si la expansión ocurrió).
+    Compara los enlaces a documentos (`a[href*=".htm"]`) de toda la página
+    antes y después del clic, y se queda con los que aparecen nuevos — en
+    vez de buscar dentro de un contenedor cercano al encabezado/ícono,
+    porque se confirmó (con capturas de un run anterior) que el clic sí
+    expande la sección visualmente pero los enlaces resultantes no quedan
+    anidados ahí.
 
-    AJUSTAR: aunque la URL del índice, que "Ver Más" es un ícono (no texto)
-    y el formato real de los `href` (ej. .../docs/ley_2380_2024.htm#1) ya
-    se confirmaron con acceso real al sitio, el xpath de búsqueda de
-    ancestros sigue siendo una aproximación genérica.
+    Si se pasa `directorio_capturas`, guarda capturas de pantalla antes y
+    después del clic (diagnóstico visual adicional).
     """
     documentos: list[DocumentoDescubierto] = []
     with sync_playwright() as p:
@@ -196,7 +215,9 @@ def descubrir_urls_seccion(
                 path=f"{directorio_capturas}/01_antes_del_clic.png", full_page=True
             )
 
-        icono, contenedor = _localizar_icono_ver_mas(seccion_heading)
+        enlaces_antes = _enlaces_documento_en_pagina(page)
+
+        icono = _localizar_icono_ver_mas(seccion_heading)
         if icono is not None:
             logger.info("Ícono 'Ver Más' localizado para %r, haciendo clic...", seccion_titulo)
             icono.click()
@@ -209,38 +230,39 @@ def descubrir_urls_seccion(
                 "más de lo esperado.",
                 seccion_titulo,
             )
-            contenedor = seccion_heading.locator("xpath=ancestor::*[3]")
 
-        # Espera explícita a que aparezca al menos un enlace a documento
-        # (href que contenga ".htm") dentro del contenedor, en vez de un
-        # time.sleep/wait_for_timeout fijo que podría no alcanzar (o
-        # sobrar) según cuánto tarde la expansión en renderizarse.
-        enlace_doc = contenedor.locator('a[href*=".htm"]')
-        try:
-            enlace_doc.first.wait_for(state="attached", timeout=8000)
-            logger.info("Apareció al menos un enlace a documento tras el clic.")
-        except PlaywrightTimeoutError:
+        # Sondea la página completa hasta 8s esperando que aparezcan
+        # enlaces nuevos (en vez de un contenedor o un sleep fijo).
+        deadline = time.time() + 8
+        enlaces_nuevos: dict[str, str] = {}
+        while time.time() < deadline:
+            enlaces_actuales = _enlaces_documento_en_pagina(page)
+            enlaces_nuevos = {
+                href: texto
+                for href, texto in enlaces_actuales.items()
+                if href not in enlaces_antes
+            }
+            if enlaces_nuevos:
+                break
+            page.wait_for_timeout(300)
+
+        if not enlaces_nuevos:
             logger.warning(
-                "Tras el clic, no apareció ningún <a href*='.htm'> dentro "
-                "del contenedor en 8s; puede que la expansión no haya "
-                "ocurrido, haya tardado más de eso, o los enlaces se "
-                "inserten fuera de este contenedor."
+                "No aparecieron enlaces nuevos en toda la página tras el "
+                "clic (8s de espera)."
             )
+        else:
+            logger.info("Aparecieron %d enlaces nuevos tras el clic.", len(enlaces_nuevos))
 
         if directorio_capturas:
             page.screenshot(
                 path=f"{directorio_capturas}/02_despues_del_clic.png", full_page=True
             )
 
-        enlaces = contenedor.locator("a")
-        for i in range(enlaces.count()):
-            href = enlaces.nth(i).get_attribute("href")
-            if not href or href.startswith("#"):
-                continue
-            if not re.search(r"\.html?($|[?#])", href, re.IGNORECASE):
+        for href, titulo in enlaces_nuevos.items():
+            if href.startswith("#"):
                 continue
             url_absoluta = urljoin(INDEX_URL, href)
-            titulo = (enlaces.nth(i).inner_text() or "").strip()
             if url_absoluta not in {d.url for d in documentos}:
                 documentos.append(DocumentoDescubierto(url=url_absoluta, titulo=titulo))
             if limite and len(documentos) >= limite:
