@@ -54,6 +54,14 @@ INDEX_URL = "https://normograma.dian.gov.co/dian/compilacion/t_1_normativa_tribu
 # texto — confirmado con acceso real al sitio.
 VER_MAS_ALT_RE = re.compile(r"ver\s*m[aá]s", re.IGNORECASE)
 
+# AJUSTAR: el usuario confirmó que el índice muestra un ÍCONO ROJO junto a
+# cada norma derogada, pero no se pudo verificar en vivo el atributo
+# exacto (alt/title/src/clase) que usa ese ícono — esta es una heurística
+# por palabras clave sobre alt/title/src/class de cualquier <img> cercana
+# al enlace, pensada para validarse comparando contra el estado inferido
+# del texto de cada artículo (ver ingestar_documento).
+DEROGADO_ICON_RE = re.compile(r"derogad|no\s*vigente", re.IGNORECASE)
+
 USER_AGENT = "buscador-normatividad-bot/0.1 (+ingesta de normatividad tributaria publica)"
 REQUEST_DELAY_SECONDS = 1.0
 
@@ -91,6 +99,12 @@ DOC_LINK_RE = re.compile(
 class DocumentoDescubierto:
     url: str
     titulo: str = ""
+    # Señal del ícono del índice: True si parece marcado como derogado,
+    # False si hay un ícono pero no indica derogado, None si no se pudo
+    # determinar (ningún ícono cercano al enlace). Es a nivel de
+    # DOCUMENTO completo (la fila del índice), no por artículo individual
+    # — ver la nota en ingestar_documento sobre esa limitación.
+    indice_marca_derogado: bool | None = None
 
 
 def _tipo_norma_desde_url(url: str) -> str:
@@ -172,19 +186,54 @@ def _localizar_icono_ver_mas(seccion_heading):
     return None
 
 
-def _enlaces_documento_en_pagina(page) -> dict[str, str]:
-    """Devuelve {href: texto_visible} de todos los <a href*=".htm"> de TODA
-    la página, sin acotar a ningún contenedor — confirmado con capturas de
-    pantalla que el clic en "Ver Más" sí expande la sección visualmente,
-    pero los enlaces resultantes no quedan anidados dentro de ningún
-    ancestro cercano al encabezado/ícono."""
+def _detectar_marca_derogado(elemento_enlace) -> bool | None:
+    """Busca, dentro del elemento padre del enlace, algún <img> cuyo
+    alt/title/src/class sugiera el ícono rojo de "derogado" del índice.
+
+    Devuelve True si encuentra un ícono que matchea DEROGADO_ICON_RE,
+    False si encuentra algún ícono pero ninguno matchea (otro estado, ej.
+    vigente), o None si no hay ningún ícono cerca del enlace (señal no
+    disponible — no se debe interpretar como "vigente")."""
+    padre = elemento_enlace.locator("xpath=..")
+    iconos = padre.locator("img")
+    total = iconos.count()
+    if total == 0:
+        return None
+    for i in range(total):
+        icono = iconos.nth(i)
+        atributos = " ".join(
+            filter(
+                None,
+                [
+                    icono.get_attribute("alt"),
+                    icono.get_attribute("title"),
+                    icono.get_attribute("src"),
+                    icono.get_attribute("class"),
+                ],
+            )
+        )
+        if DEROGADO_ICON_RE.search(atributos):
+            return True
+    return False
+
+
+def _enlaces_documento_en_pagina(page) -> dict[str, dict]:
+    """Devuelve {href: {"titulo": str, "indice_marca_derogado": bool|None}}
+    de todos los <a href*=".htm"> de TODA la página, sin acotar a ningún
+    contenedor — confirmado con capturas de pantalla que el clic en "Ver
+    Más" sí expande la sección visualmente, pero los enlaces resultantes
+    no quedan anidados dentro de ningún ancestro cercano al encabezado/
+    ícono."""
     enlaces = page.locator('a[href*=".htm"]')
-    resultado: dict[str, str] = {}
+    resultado: dict[str, dict] = {}
     for i in range(enlaces.count()):
         el = enlaces.nth(i)
         href = el.get_attribute("href")
-        if href:
-            resultado.setdefault(href, (el.inner_text() or "").strip())
+        if href and href not in resultado:
+            resultado[href] = {
+                "titulo": (el.inner_text() or "").strip(),
+                "indice_marca_derogado": _detectar_marca_derogado(el),
+            }
     return resultado
 
 
@@ -240,12 +289,12 @@ def descubrir_urls_seccion(
         # Sondea la página completa hasta 8s esperando que aparezcan
         # enlaces nuevos (en vez de un contenedor o un sleep fijo).
         deadline = time.time() + 8
-        enlaces_nuevos: dict[str, str] = {}
+        enlaces_nuevos: dict[str, dict] = {}
         while time.time() < deadline:
             enlaces_actuales = _enlaces_documento_en_pagina(page)
             enlaces_nuevos = {
-                href: texto
-                for href, texto in enlaces_actuales.items()
+                href: info
+                for href, info in enlaces_actuales.items()
                 if href not in enlaces_antes
             }
             if enlaces_nuevos:
@@ -265,12 +314,18 @@ def descubrir_urls_seccion(
                 path=f"{directorio_capturas}/02_despues_del_clic.png", full_page=True
             )
 
-        for href, titulo in enlaces_nuevos.items():
+        for href, info in enlaces_nuevos.items():
             if href.startswith("#"):
                 continue
             url_absoluta = urljoin(INDEX_URL, href)
             if url_absoluta not in {d.url for d in documentos}:
-                documentos.append(DocumentoDescubierto(url=url_absoluta, titulo=titulo))
+                documentos.append(
+                    DocumentoDescubierto(
+                        url=url_absoluta,
+                        titulo=info["titulo"],
+                        indice_marca_derogado=info["indice_marca_derogado"],
+                    )
+                )
             if limite and len(documentos) >= limite:
                 break
 
@@ -377,16 +432,35 @@ def verificar_numeracion_articulos(db: Session) -> dict:
     }
 
 
-def ingestar_documento(db: Session, url: str) -> int:
+def ingestar_documento(
+    db: Session, url: str, indice_marca_derogado: bool | None = None
+) -> tuple[int, list[str]]:
     """Descarga, parsea e inserta los fragmentos (artículos) de un
-    documento. Devuelve cuántos fragmentos nuevos insertó (0 si ya
-    existían todos, para que el scraper sea seguro de re-ejecutar)."""
+    documento. Devuelve (insertados, advertencias):
+    - insertados: cuántos fragmentos nuevos insertó (0 si ya existían
+      todos, para que el scraper sea seguro de re-ejecutar).
+    - advertencias: mensajes cuando `indice_marca_derogado` (señal del
+      ícono del índice, a nivel de documento completo) no coincide con
+      el estado_vigencia inferido del texto de un artículo. Es solo una
+      verificación cruzada: nunca sobrescribe estado_vigencia, que sigue
+      viniendo del texto.
+
+    LIMITACIÓN CONOCIDA: `indice_marca_derogado` es una señal por
+    DOCUMENTO (la fila del índice), no por artículo. Para documentos
+    atómicos (una ley/decreto corto) documento y artículo casi siempre
+    coinciden. Para un documento consolidado grande como el Estatuto
+    Tributario (un solo ícono para todo el documento, que en sí mismo
+    nunca está "derogado"), comparar ese único valor contra cada uno de
+    sus ~1000+ artículos —muchos legítimamente derogados/modificados en
+    el texto— generará muchas advertencias esperables, no indicativas de
+    un bug. Revisar el volumen de advertencias con ese contexto."""
     html = descargar_html(url)
     texto_completo = _texto_plano(html)
     tipo_norma = _tipo_norma_desde_url(url)
     fragmentos = _extraer_articulos(texto_completo)
 
     insertados = 0
+    advertencias: list[str] = []
     for numero_articulo, texto in fragmentos:
         if not texto or len(texto) < 20:
             continue
@@ -399,6 +473,17 @@ def ingestar_documento(db: Session, url: str) -> int:
 
         estado_vigencia, nota_vigencia = _estado_y_nota_vigencia(texto)
         fuente = _fuente_desde_url(url, tipo_norma, numero_articulo)
+
+        if indice_marca_derogado is not None:
+            texto_dice_derogado = estado_vigencia == "derogado"
+            if texto_dice_derogado != indice_marca_derogado:
+                advertencias.append(
+                    f"{url_fuente}: el índice marca "
+                    f"{'derogado' if indice_marca_derogado else 'no derogado'} "
+                    f"pero el texto sugiere estado_vigencia={estado_vigencia!r} "
+                    "— revisar manualmente."
+                )
+
         embedding = embed_document(texto)
 
         norma = Norma(
@@ -416,7 +501,7 @@ def ingestar_documento(db: Session, url: str) -> int:
         insertados += 1
         time.sleep(REQUEST_DELAY_SECONDS)
 
-    return insertados
+    return insertados, advertencias
 
 
 def scrapear_seccion(
@@ -436,6 +521,7 @@ def scrapear_seccion(
         "documentos_procesados": 0,
         "fragmentos_insertados": 0,
         "errores": [],
+        "advertencias_vigencia_indice_vs_texto": [],
     }
 
     documentos = descubrir_urls_seccion(
@@ -449,9 +535,12 @@ def scrapear_seccion(
     while pendientes:
         doc = pendientes.pop(0)
         try:
-            insertados = ingestar_documento(db, doc.url)
+            insertados, advertencias = ingestar_documento(
+                db, doc.url, indice_marca_derogado=doc.indice_marca_derogado
+            )
             resumen["documentos_procesados"] += 1
             resumen["fragmentos_insertados"] += insertados
+            resumen["advertencias_vigencia_indice_vs_texto"].extend(advertencias)
             logger.info("Procesado %s: %d fragmentos insertados", doc.url, insertados)
 
             if seguir_enlaces_cruzados:
