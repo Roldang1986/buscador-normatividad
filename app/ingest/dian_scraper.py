@@ -65,13 +65,21 @@ INDEX_URL = "https://normograma.dian.gov.co/dian/compilacion/t_1_normativa_tribu
 # texto — confirmado con acceso real al sitio.
 VER_MAS_ALT_RE = re.compile(r"ver\s*m[aá]s", re.IGNORECASE)
 
-# AJUSTAR: el usuario confirmó que el índice muestra un ÍCONO ROJO junto a
-# cada norma derogada, pero no se pudo verificar en vivo el atributo
-# exacto (alt/title/src/clase) que usa ese ícono — esta es una heurística
-# por palabras clave sobre alt/title/src/class de cualquier <img> cercana
-# al enlace, pensada para validarse comparando contra el estado inferido
-# del texto de cada artículo (ver ingestar_documento).
-DEROGADO_ICON_RE = re.compile(r"derogad|no\s*vigente", re.IGNORECASE)
+# Confirmado con un caso real (ley_1943_2018.htm, declarada INEXEQUIBLE
+# por la Corte Constitucional, Sentencia C-481-19 — verificado
+# visualmente por el usuario como marcada en rojo en el índice): la marca
+# NO es un <img> (el único <img> presente en TODOS los enlaces del
+# índice es un botón genérico de "volver arriba", <img alt="Arriba">,
+# ajeno al estado de la norma — ese fue el bug original, que hacía que
+# el heurístico devolviera False para el 100% de los documentos sin
+# importar su estado real). La marca real es un <span> con una clase de
+# estado (ej. <span class="inconstitucional">Inconstitucional</span>)
+# prefijado a la descripción del documento. Solo se confirmó el caso
+# "inconstitucional"; el resto de palabras clave (derogad, no vigente)
+# siguen sin un caso real que las confirme — AJUSTAR si aparece uno.
+ESTADO_ESPECIAL_SPAN_RE = re.compile(
+    r"derogad|no\s*vigente|inexequible|inconstitucional", re.IGNORECASE
+)
 
 USER_AGENT = "buscador-normatividad-bot/0.1 (+ingesta de normatividad tributaria publica)"
 REQUEST_DELAY_SECONDS = 1.0
@@ -91,10 +99,26 @@ ARTICULO_HEADER_RE = re.compile(
     r"(?im)^\s*(?:ART[ÍI]CULO|ART\.)\s+([0-9]+(?:-[0-9]+)*[A-Za-zºo°]*)\s*\.?[\-–—]?\s*"
 )
 
-# Nota de vigencia esperada justo después del encabezado del artículo, ej.
-# "(Modificado por el artículo 57 de la Ley 2277 de 2022)".
+# Nota de vigencia real — confirmada con tres casos reales en
+# estatuto_tributario.htm y ley_1943_2018.htm, NO con paréntesis como se
+# asumía originalmente (esa versión nunca matcheó nada real). El sitio
+# usa corchetes angulares en dos variantes:
+#   1. Nivel documento (encabezado de ley/decreto completo):
+#      "<NOTA DE VIGENCIA: Ley INEXEQUIBLE a partir del 1o. de enero de
+#      2020, C-481-19>"
+#   2. Nivel artículo individual (sin el prefijo "NOTA DE VIGENCIA:"):
+#      "<Artículo modificado por el artículo 173 de la Ley 1819 de
+#      2016. El nuevo texto es el siguiente:>"
+#      "<Artículo adicionado por el artículo 57 de la Ley 2277 de
+#      2022...>"
+# El prefijo "NOTA DE VIGENCIA:" es opcional y el texto antes de la
+# palabra clave de estado es variable ("Ley ", "Artículo "), así que se
+# permite un preámbulo corto en vez de anclar la palabra clave al inicio
+# del contenido.
 VIGENCIA_RE = re.compile(
-    r"\((Modificad[oa]|Derogad[oa]|Adicionad[oa]|Subrogad[oa])[^)]{0,300}\)",
+    r"<(?:NOTA DE VIGENCIA:\s*)?[^>]{0,80}?"
+    r"(Modificad[oa]|Derogad[oa]|Adicionad[oa]|Subrogad[oa]|INEXEQUIBLE|[Ii]nconstitucional)"
+    r"[^>]{0,300}>",
     re.IGNORECASE,
 )
 
@@ -173,9 +197,18 @@ def _estado_y_nota_vigencia(texto_articulo: str) -> tuple[str, str | None]:
     m = VIGENCIA_RE.search(texto_articulo[:400])
     if not m:
         return "vigente", None
-    nota = m.group(0).strip("() ")
+    nota = m.group(0).strip("<> ")
     palabra = m.group(1).lower()
-    if palabra.startswith("derogad"):
+    # "Inexequible" (declarada así por la Corte Constitucional) e
+    # "inconstitucional" tienen el mismo efecto práctico que "derogado"
+    # (la norma no está vigente) — se reutiliza ese mismo estado en vez
+    # de crear un tercer valor, preservando la distinción legal exacta
+    # en nota_vigencia.
+    if (
+        palabra.startswith("derogad")
+        or palabra.startswith("inexequible")
+        or palabra.startswith("inconstitucional")
+    ):
         return "derogado", nota
     return "modificado", nota
 
@@ -198,32 +231,36 @@ def _localizar_icono_ver_mas(seccion_heading):
 
 
 def _detectar_marca_derogado(elemento_enlace) -> bool | None:
-    """Busca, dentro del elemento padre del enlace, algún <img> cuyo
-    alt/title/src/class sugiera el ícono rojo de "derogado" del índice.
+    """Busca, dentro del elemento padre del enlace (el <li
+    class="documento-arbol"> que contiene ambos <a> del documento —
+    confirmado que es el mismo <li> sea cual sea de los dos <a>
+    duplicados por href se use), algún <span> cuya clase o texto indique
+    un estado especial.
 
-    Devuelve True si encuentra un ícono que matchea DEROGADO_ICON_RE,
-    False si encuentra algún ícono pero ninguno matchea (otro estado, ej.
-    vigente), o None si no hay ningún ícono cerca del enlace (señal no
-    disponible — no se debe interpretar como "vigente")."""
+    Confirmado con un caso real (ley_1943_2018.htm): la marca es
+    <span class="inconstitucional">Inconstitucional</span> prefijado a
+    la descripción del documento — NO un <img>, que es lo que se buscaba
+    originalmente (el único <img> presente en todos los enlaces es un
+    botón genérico de "volver arriba", ajeno al estado de la norma; por
+    eso el heurístico anterior devolvía False para el 100% de los
+    documentos sin importar su estado real).
+
+    Devuelve True si encuentra un <span> que matchea
+    ESTADO_ESPECIAL_SPAN_RE, False si encuentra spans pero ninguno
+    matchea (ej. el <span class="id-documento"> con el nombre de la
+    norma, presente siempre), o None si no hay ningún <span> en el padre
+    (señal no disponible — no se debe interpretar como "vigente")."""
     padre = elemento_enlace.locator("xpath=..")
-    iconos = padre.locator("img")
-    total = iconos.count()
+    spans = padre.locator("span")
+    total = spans.count()
     if total == 0:
         return None
     for i in range(total):
-        icono = iconos.nth(i)
-        atributos = " ".join(
-            filter(
-                None,
-                [
-                    icono.get_attribute("alt"),
-                    icono.get_attribute("title"),
-                    icono.get_attribute("src"),
-                    icono.get_attribute("class"),
-                ],
-            )
+        span = spans.nth(i)
+        contenido = " ".join(
+            filter(None, [span.get_attribute("class"), span.inner_text()])
         )
-        if DEROGADO_ICON_RE.search(atributos):
+        if ESTADO_ESPECIAL_SPAN_RE.search(contenido):
             return True
     return False
 
@@ -516,6 +553,44 @@ def verificar_numeracion_articulos(db: Session) -> dict:
         "truncados_restantes": truncados,
         "articulos_631": articulos_631,
         "numero_articulo_con_letras_no_ordinales": con_letras_no_ordinales,
+    }
+
+
+def verificar_vigencia_texto_almacenado(db: Session) -> dict:
+    """Diagnóstico de solo lectura: reaplica el VIGENCIA_RE ya corregido
+    (corchetes angulares, con o sin prefijo "NOTA DE VIGENCIA:") sobre el
+    `texto` YA ALMACENADO de cada norma con estado_vigencia="vigente" en
+    la BD, para saber cuántas deberían tener otro estado según el texto
+    real — sin necesidad de volver a descargar ni scrapear nada. No
+    escribe nada en la BD.
+
+    Audita TODAS las normas marcadas "vigente" en la tabla, no solo las
+    de la corrida más reciente: es la forma más simple y robusta de
+    medir el alcance real del bug del regex anterior (que nunca matcheó
+    paréntesis "(...)" porque el sitio real usa corchetes angulares
+    "<...>"), y responde directamente si hace falta borrar y reinsertar
+    todo o si el daño es acotado."""
+    vigentes = db.query(Norma).filter(Norma.estado_vigencia == "vigente").all()
+
+    deberian_cambiar = []
+    for n in vigentes:
+        estado_recalculado, nota_recalculada = _estado_y_nota_vigencia(n.texto[:400])
+        if estado_recalculado != "vigente":
+            deberian_cambiar.append(
+                {
+                    "id": n.id,
+                    "url_fuente": n.url_fuente,
+                    "estado_actual": n.estado_vigencia,
+                    "estado_recalculado": estado_recalculado,
+                    "nota_recalculada": nota_recalculada,
+                }
+            )
+
+    return {
+        "total_normas_en_bd": db.query(Norma).count(),
+        "total_normas_estado_vigente_en_bd": len(vigentes),
+        "deberian_cambiar_de_estado": len(deberian_cambiar),
+        "detalle_primeras_50": deberian_cambiar[:50],
     }
 
 
