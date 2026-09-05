@@ -32,6 +32,7 @@ Confirmado con acceso real al sitio (no heurístico):
 from __future__ import annotations
 
 import logging
+import pathlib
 import re
 import time
 from dataclasses import dataclass
@@ -252,8 +253,10 @@ def descubrir_urls_seccion(
     expande la sección visualmente pero los enlaces resultantes no quedan
     anidados ahí.
 
-    Si se pasa `directorio_capturas`, guarda capturas de pantalla antes y
-    después del clic (diagnóstico visual adicional).
+    Si se pasa `directorio_capturas`, guarda capturas de pantalla Y el HTML
+    completo del DOM (antes/después del clic) — el HTML es lo que permite
+    diseñar un selector de aislamiento con evidencia real en vez de
+    adivinar, que es más útil que la captura visual para eso.
     """
     documentos: list[DocumentoDescubierto] = []
     with sync_playwright() as p:
@@ -268,6 +271,9 @@ def descubrir_urls_seccion(
         if directorio_capturas:
             page.screenshot(
                 path=f"{directorio_capturas}/01_antes_del_clic.png", full_page=True
+            )
+            pathlib.Path(f"{directorio_capturas}/01_antes_del_clic.html").write_text(
+                page.content(), encoding="utf-8"
             )
 
         enlaces_antes = _enlaces_documento_en_pagina(page)
@@ -313,6 +319,9 @@ def descubrir_urls_seccion(
             page.screenshot(
                 path=f"{directorio_capturas}/02_despues_del_clic.png", full_page=True
             )
+            pathlib.Path(f"{directorio_capturas}/02_despues_del_clic.html").write_text(
+                page.content(), encoding="utf-8"
+            )
 
         for href, info in enlaces_nuevos.items():
             if href.startswith("#"):
@@ -334,7 +343,28 @@ def descubrir_urls_seccion(
     logger.info(
         "Descubiertos %d documentos en la sección %r", len(documentos), seccion_titulo
     )
+    logger.info(
+        "Detección de ícono de vigencia en el índice: %s",
+        contar_marca_derogado(documentos),
+    )
     return documentos
+
+
+def contar_marca_derogado(documentos: list[DocumentoDescubierto]) -> dict:
+    """Cuenta cuántos documentos descubiertos tienen indice_marca_derogado
+    en True/False/None. Existe para poder distinguir "el heurístico del
+    ícono corrió y no encontró desacuerdos" de "el heurístico nunca
+    encuentra ningún ícono" (ambos casos, sin este conteo, se ven iguales:
+    0 advertencias)."""
+    conteo = {"true": 0, "false": 0, "none": 0}
+    for doc in documentos:
+        if doc.indice_marca_derogado is True:
+            conteo["true"] += 1
+        elif doc.indice_marca_derogado is False:
+            conteo["false"] += 1
+        else:
+            conteo["none"] += 1
+    return conteo
 
 
 def descubrir_enlaces_cruzados(html: str, base_url: str) -> list[str]:
@@ -528,6 +558,7 @@ def scrapear_seccion(
         seccion_titulo, limite=limite_documentos, directorio_capturas=directorio_capturas
     )
     resumen["documentos_encontrados_en_indice"] = len(documentos)
+    resumen["deteccion_icono_vigencia_indice"] = contar_marca_derogado(documentos)
 
     vistos = {d.url for d in documentos}
     pendientes = list(documentos)

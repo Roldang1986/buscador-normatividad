@@ -21,6 +21,11 @@ on:
         required: false
         type: boolean
         default: false
+      solo_descubrir:
+        description: "No descarga ni inserta nada en la BD: solo corre el descubrimiento en el índice e imprime los documentos encontrados + conteo de indice_marca_derogado. Combinar con capturas para inspeccionar el HTML del DOM."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   scraper:
@@ -52,6 +57,7 @@ jobs:
           LIMITE: ${{ github.event.inputs.limite }}
           LIMPIAR_TRUNCADOS: ${{ github.event.inputs.limpiar_truncados }}
           SOLO_VERIFICAR: ${{ github.event.inputs.solo_verificar_numeracion }}
+          SOLO_DESCUBRIR: ${{ github.event.inputs.solo_descubrir }}
         run: |
           ARGS=(scripts/run_dian_scraper.py "$SECCION" --limite "$LIMITE" --capturas-dir scraper-debug)
           if [ "$LIMPIAR_TRUNCADOS" = "true" ]; then
@@ -59,6 +65,9 @@ jobs:
           fi
           if [ "$SOLO_VERIFICAR" = "true" ]; then
             ARGS+=(--solo-verificar-numeracion)
+          fi
+          if [ "$SOLO_DESCUBRIR" = "true" ]; then
+            ARGS+=(--solo-descubrir)
           fi
           python "${ARGS[@]}"
 
