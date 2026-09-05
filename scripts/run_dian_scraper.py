@@ -37,6 +37,20 @@ def main() -> None:
         help="Máximo de documentos a descubrir en la sección (default: 3)",
     )
     parser.add_argument(
+        "--limite-fragmentos-por-documento",
+        type=int,
+        default=None,
+        help=(
+            "Trunca cada documento a sus primeros N fragmentos (artículos) "
+            "antes de insertarlos. Distinto de --limite: ese acota cuántos "
+            "documentos del índice se descubren, este acota el tamaño de "
+            "cada documento individual — necesario para documentos "
+            "consolidados grandes como el Estatuto Tributario compilado "
+            "(~1000+ artículos en un solo documento), donde --limite no "
+            "ayuda porque cuenta documentos del índice, no artículos."
+        ),
+    )
+    parser.add_argument(
         "--seguir-enlaces-cruzados",
         action="store_true",
         help="Además de la sección, sigue los enlaces cruzados dentro de cada documento",
@@ -128,6 +142,7 @@ def main() -> None:
             limite_documentos=args.limite,
             seguir_enlaces_cruzados=args.seguir_enlaces_cruzados,
             directorio_capturas=args.capturas_dir,
+            limite_fragmentos_por_documento=args.limite_fragmentos_por_documento,
         )
     finally:
         db.close()
