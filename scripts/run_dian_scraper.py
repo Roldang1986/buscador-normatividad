@@ -17,6 +17,7 @@ from app.ingest.dian_scraper import (
     limpiar_numeros_articulo_truncados,
     scrapear_seccion,
     verificar_numeracion_articulos,
+    verificar_vigencia_texto_almacenado,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -83,6 +84,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--solo-verificar-vigencia",
+        action="store_true",
+        help=(
+            "No scrapea nada: reaplica el VIGENCIA_RE corregido sobre el "
+            "texto ya almacenado de cada norma con estado_vigencia="
+            "'vigente' en la BD, e imprime cuántas deberían cambiar de "
+            "estado según el texto real. Solo lectura, no modifica la BD. "
+            "Ignora 'seccion' y '--limite'."
+        ),
+    )
+    parser.add_argument(
         "--solo-descubrir",
         action="store_true",
         help=(
@@ -96,9 +108,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.solo_verificar_numeracion and not args.seccion:
+    if (
+        not args.solo_verificar_numeracion
+        and not args.solo_verificar_vigencia
+        and not args.seccion
+    ):
         parser.error(
-            "'seccion' es obligatorio salvo con --solo-verificar-numeracion"
+            "'seccion' es obligatorio salvo con --solo-verificar-numeracion "
+            "o --solo-verificar-vigencia"
         )
 
     if args.capturas_dir:
@@ -129,6 +146,12 @@ def main() -> None:
         if args.solo_verificar_numeracion:
             diagnostico = verificar_numeracion_articulos(db)
             print("\n=== Diagnóstico de numeración de artículos ===")
+            print(json.dumps(diagnostico, indent=2, ensure_ascii=False))
+            return
+
+        if args.solo_verificar_vigencia:
+            diagnostico = verificar_vigencia_texto_almacenado(db)
+            print("\n=== Diagnóstico de vigencia sobre texto ya almacenado ===")
             print(json.dumps(diagnostico, indent=2, ensure_ascii=False))
             return
 
