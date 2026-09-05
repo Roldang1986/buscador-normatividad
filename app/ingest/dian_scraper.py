@@ -58,12 +58,18 @@ USER_AGENT = "buscador-normatividad-bot/0.1 (+ingesta de normatividad tributaria
 REQUEST_DELAY_SECONDS = 1.0
 
 # Encabezado de artículo al inicio de línea: "ARTÍCULO 420.", "Artículo 5o.",
-# "ART. 34-1.". No captura menciones de "artículo" a mitad de párrafo porque
-# exige inicio de línea (^) — pero el corte de líneas del HTML real puede
-# no coincidir exactamente con esta suposición; ajustar si el primer run
-# produce fragmentos mal cortados.
+# "ARTÍCULO 631-1." (numeración de artículos "adicionados", muy común en el
+# Estatuto Tributario: 631-1 a 631-6, 869-1, 108-1, etc. — el grupo
+# "(?:-[0-9]+)*" captura el/los sufijo(s) numérico(s) completos en vez de
+# cortarse en el guión, que era el bug original: [A-Za-z°ºo\-]* no incluía
+# dígitos, así que "631-1", "631-2"... "631-6" colapsaban todos en
+# numero_articulo="631-" y se descartaban como duplicados del primero).
+# No captura menciones de "artículo" a mitad de párrafo porque exige
+# inicio de línea (^) — pero el corte de líneas del HTML real puede no
+# coincidir exactamente con esta suposición; ajustar si un run produce
+# fragmentos mal cortados.
 ARTICULO_HEADER_RE = re.compile(
-    r"(?im)^\s*(?:ART[ÍI]CULO|ART\.)\s+([0-9]+[A-Za-z°ºo\-]*)\s*\.?[\-–—]?\s*"
+    r"(?im)^\s*(?:ART[ÍI]CULO|ART\.)\s+([0-9]+(?:-[0-9]+)*[A-Za-zºo°]*)\s*\.?[\-–—]?\s*"
 )
 
 # Nota de vigencia esperada justo después del encabezado del artículo, ej.
@@ -310,6 +316,26 @@ def _texto_plano(html: str) -> str:
 
 def _norma_existe(db: Session, url_fuente: str) -> bool:
     return db.query(Norma).filter(Norma.url_fuente == url_fuente).first() is not None
+
+
+def limpiar_numeros_articulo_truncados(db: Session) -> int:
+    """Borra normas cuyo numero_articulo quedó truncado con un guión al
+    final (ej. "631-" en vez de "631-1") por el bug de ARTICULO_HEADER_RE
+    anterior a la corrección: la clase de caracteres del sufijo no incluía
+    dígitos, así que "631-1", "631-2"... "631-6" colapsaban todos en
+    numero_articulo="631-" y solo el primero se insertaba (los demás se
+    descartaban como duplicados de esa misma URL truncada).
+
+    Un numero_articulo real nunca termina en guión con el regex corregido,
+    así que "termina en '-'" es una señal segura de este bug específico.
+    Devuelve cuántas filas borró."""
+    borrados = (
+        db.query(Norma)
+        .filter(Norma.numero_articulo.like("%-"))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return borrados
 
 
 def ingestar_documento(db: Session, url: str) -> int:
