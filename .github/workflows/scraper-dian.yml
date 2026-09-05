@@ -40,4 +40,14 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           SECCION: ${{ github.event.inputs.seccion }}
           LIMITE: ${{ github.event.inputs.limite }}
-        run: python scripts/run_dian_scraper.py "$SECCION" --limite "$LIMITE"
+        run: >
+          python scripts/run_dian_scraper.py "$SECCION" --limite "$LIMITE"
+          --capturas-dir scraper-debug
+
+      - name: Subir capturas de diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-debug-screenshots
+          path: scraper-debug/
+          if-no-files-found: ignore

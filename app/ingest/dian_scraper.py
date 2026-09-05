@@ -35,6 +35,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 from sqlalchemy.orm import Session
 
@@ -165,16 +166,20 @@ def _localizar_icono_ver_mas(seccion_heading):
 
 
 def descubrir_urls_seccion(
-    seccion_titulo: str, limite: int | None = None
+    seccion_titulo: str,
+    limite: int | None = None,
+    directorio_capturas: str | None = None,
 ) -> list[DocumentoDescubierto]:
     """Usa Playwright para expandir "Ver Más" en una sección del índice
     tributario y devolver las URLs de documentos individuales encontradas.
 
-    AJUSTAR: aunque la URL del índice y el hallazgo de que "Ver Más" es un
-    ícono (no texto) ya se confirmaron con acceso real al sitio, el
-    xpath de búsqueda de ancestros sigue siendo una aproximación genérica
-    — validar contra el DOM real si este segundo intento tampoco encuentra
-    el ícono.
+    Si se pasa `directorio_capturas`, guarda ahí capturas de pantalla antes
+    y después del clic (diagnóstico visual de si la expansión ocurrió).
+
+    AJUSTAR: aunque la URL del índice, que "Ver Más" es un ícono (no texto)
+    y el formato real de los `href` (ej. .../docs/ley_2380_2024.htm#1) ya
+    se confirmaron con acceso real al sitio, el xpath de búsqueda de
+    ancestros sigue siendo una aproximación genérica.
     """
     documentos: list[DocumentoDescubierto] = []
     with sync_playwright() as p:
@@ -186,10 +191,16 @@ def descubrir_urls_seccion(
         seccion_heading = page.get_by_text(seccion_titulo, exact=False).first
         seccion_heading.wait_for(state="visible")
 
+        if directorio_capturas:
+            page.screenshot(
+                path=f"{directorio_capturas}/01_antes_del_clic.png", full_page=True
+            )
+
         icono, contenedor = _localizar_icono_ver_mas(seccion_heading)
         if icono is not None:
+            logger.info("Ícono 'Ver Más' localizado para %r, haciendo clic...", seccion_titulo)
             icono.click()
-            page.wait_for_timeout(1500)
+            logger.info("Clic ejecutado sin excepción.")
         else:
             logger.warning(
                 "No se encontró el ícono 'Ver Más' cerca del encabezado de "
@@ -199,6 +210,27 @@ def descubrir_urls_seccion(
                 seccion_titulo,
             )
             contenedor = seccion_heading.locator("xpath=ancestor::*[3]")
+
+        # Espera explícita a que aparezca al menos un enlace a documento
+        # (href que contenga ".htm") dentro del contenedor, en vez de un
+        # time.sleep/wait_for_timeout fijo que podría no alcanzar (o
+        # sobrar) según cuánto tarde la expansión en renderizarse.
+        enlace_doc = contenedor.locator('a[href*=".htm"]')
+        try:
+            enlace_doc.first.wait_for(state="attached", timeout=8000)
+            logger.info("Apareció al menos un enlace a documento tras el clic.")
+        except PlaywrightTimeoutError:
+            logger.warning(
+                "Tras el clic, no apareció ningún <a href*='.htm'> dentro "
+                "del contenedor en 8s; puede que la expansión no haya "
+                "ocurrido, haya tardado más de eso, o los enlaces se "
+                "inserten fuera de este contenedor."
+            )
+
+        if directorio_capturas:
+            page.screenshot(
+                path=f"{directorio_capturas}/02_despues_del_clic.png", full_page=True
+            )
 
         enlaces = contenedor.locator("a")
         for i in range(enlaces.count()):
@@ -305,6 +337,7 @@ def scrapear_seccion(
     seccion_titulo: str,
     limite_documentos: int | None = None,
     seguir_enlaces_cruzados: bool = False,
+    directorio_capturas: str | None = None,
 ) -> dict:
     """Punto de entrada: descubre documentos de una sección del índice
     tributario, los ingiere, y opcionalmente sigue sus enlaces cruzados
@@ -318,7 +351,9 @@ def scrapear_seccion(
         "errores": [],
     }
 
-    documentos = descubrir_urls_seccion(seccion_titulo, limite=limite_documentos)
+    documentos = descubrir_urls_seccion(
+        seccion_titulo, limite=limite_documentos, directorio_capturas=directorio_capturas
+    )
     resumen["documentos_encontrados_en_indice"] = len(documentos)
 
     vistos = {d.url for d in documentos}
