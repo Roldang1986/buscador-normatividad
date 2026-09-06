@@ -5,14 +5,24 @@ on:
     inputs:
       urls:
         description: "URL(s) de documento(s) a diagnosticar, separadas por espacio"
-        required: true
+        required: false
+        default: ""
+      verificar_cobertura_url:
+        description: "Si se pasa, en vez del diagnóstico de numeración corre verificar_cobertura_documento.py sobre esta URL (compara el texto real contra lo indexado en la BD)"
+        required: false
+        default: ""
+      verificar_cobertura_articulo:
+        description: "numero_articulo puntual a verificar junto con verificar_cobertura_url (opcional)"
+        required: false
+        default: ""
 
 jobs:
   diagnostico:
     runs-on: ubuntu-latest
     env:
       # app.database exige DATABASE_URL al importarse (RuntimeError si
-      # falta), aunque este diagnóstico no ejecute ninguna consulta.
+      # falta), aunque el diagnóstico de numeración no ejecute ninguna
+      # consulta (el de cobertura sí, en modo de solo lectura).
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +35,21 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
         run: python scripts/diagnosticar_numeracion_documento.py $URLS
+
+      - name: Verificar cobertura de indexación (solo lectura, con BD)
+        if: ${{ github.event.inputs.verificar_cobertura_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.verificar_cobertura_url }}
+          ARTICULO: ${{ github.event.inputs.verificar_cobertura_articulo }}
+        run: |
+          ARGS=(scripts/verificar_cobertura_documento.py "$URL_DOCUMENTO")
+          if [ -n "$ARTICULO" ]; then
+            ARGS+=(--articulo "$ARTICULO")
+          fi
+          python "${ARGS[@]}"
