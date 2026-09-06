@@ -71,6 +71,39 @@ alembic/          # migraciones de base de datos
    uvicorn app.main:app --reload
    ```
 
+## Despliegue en Railway
+
+El comando de arranque de producción está declarado en `railway.json`
+(`deploy.startCommand`), no como parte del código de la app:
+
+```
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Railway detecta el proyecto como Python vía Nixpacks e instala
+`requirements.txt` (que ya incluye `uvicorn[standard]`, necesario para
+producción, no solo para `--reload` en desarrollo local).
+
+Variables de entorno a configurar en el servicio de Railway (mismas que
+`.env.example`): `DATABASE_URL`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, y
+opcionalmente `VOYAGE_EMBEDDING_MODEL`/`VOYAGE_EMBEDDING_DIM`.
+
+**Las migraciones de Alembic NO se ejecutan automáticamente al arrancar
+el servidor** — `startCommand` solo levanta uvicorn, sin `alembic
+upgrade head` antes. Correrlas manualmente (una sola vez tras cada
+migración nueva) contra la misma `DATABASE_URL` de producción:
+
+```bash
+alembic upgrade head
+```
+
+ya sea desde un shell/comando one-off de Railway, o localmente con la
+`DATABASE_URL` de producción exportada. Este proyecto también corre
+migraciones vía GitHub Actions en workflows puntuales (ej.
+`diagnosticar-numeracion.yml`, input `ejecutar_migracion_alembic`) — ese
+sigue siendo el flujo recomendado para no acoplar el arranque del
+servidor web a cambios de esquema.
+
 ## Modelo principal: `norma`
 
 Representa un fragmento de contenido normativo (artículo del Estatuto
@@ -157,4 +190,3 @@ documento. Ver el docstring del módulo para más detalle.
 ## Pendiente
 
 - Autenticación (incluyendo proteger `/ingesta/norma`)
-- Conexión real a base de datos (Neon) y despliegue
