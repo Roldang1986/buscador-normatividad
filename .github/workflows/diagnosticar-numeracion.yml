@@ -40,6 +40,10 @@ on:
         description: "Si se pasa, corre diagnosticar_colisiones_headers.py sobre esta URL: solo lectura, identifica los casos donde una cita cruzada espuria 'ganó' un numero_articulo que le correspondía a otro header real (compara contenido actual en BD vs. el que lo reemplazaría). No borra ni inserta nada."
         required: false
         default: ""
+      corregir_colisiones_url:
+        description: "MODO DE ESCRITURA: borra las filas identificadas por diagnosticar_colisiones_url sobre esta URL y reingiere el documento para reinsertar el contenido correcto. Correr diagnosticar_colisiones_url primero — no se puede combinar con él en la misma corrida."
+        required: false
+        default: ""
 
 jobs:
   diagnostico:
@@ -61,7 +65,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -115,3 +119,10 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.diagnosticar_colisiones_url }}
         run: python scripts/diagnosticar_colisiones_headers.py "$URL_DOCUMENTO"
+
+      - name: Corregir colisiones de header (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.corregir_colisiones_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.corregir_colisiones_url }}
+        run: python scripts/aplicar_correccion_colisiones_headers.py "$URL_DOCUMENTO"

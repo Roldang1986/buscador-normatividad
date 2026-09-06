@@ -440,6 +440,16 @@ def _resolver_numeros_duplicados(
     return resultado, advertencias
 
 
+# Patrón de la advertencia que _resolver_numeros_duplicados() emite
+# cuando intercambia cuál ocurrencia se queda con el numero_articulo
+# plano (ver _parece_inicio_de_titulo) — compartido entre el diagnóstico
+# de solo lectura y la corrección de escritura para no duplicar el texto
+# exacto en dos lugares.
+PATRON_ADVERTENCIA_INTERCAMBIO_HEADER_RE = re.compile(
+    r"^numero_articulo '([^']+)': la ocurrencia 1 no parece un encabezado real"
+)
+
+
 def _estado_y_nota_vigencia(texto_articulo: str) -> tuple[str, str | None]:
     m = VIGENCIA_RE.search(texto_articulo[:400])
     if not m:
@@ -1027,6 +1037,103 @@ def aplicar_correccion_documentos_simples_derogados(db: Session, seccion_titulo:
         "seccion": seccion_titulo,
         "filas_revisadas": len(filas),
         "filas_actualizadas": actualizadas,
+    }
+
+
+def _numeros_intercambiados_del_documento(url_documento: str) -> tuple[list[str], str]:
+    """Descarga el documento real, aplica _extraer_articulos +
+    _resolver_numeros_duplicados() (ya con _parece_inicio_de_titulo) y
+    devuelve los numero_articulo donde la ocurrencia 1 quedó desplazada
+    por una posterior que sí parece un header real — ver
+    PATRON_ADVERTENCIA_INTERCAMBIO_HEADER_RE. Devuelve también url_base
+    (documento sin fragmento #) para construir url_fuente."""
+    url_base = url_documento.split("#")[0]
+    html = descargar_html(url_base)
+    texto = _texto_plano(html)
+    fragmentos = _extraer_articulos(texto)
+    _, advertencias = _resolver_numeros_duplicados(fragmentos)
+    numeros = [
+        m.group(1)
+        for adv in advertencias
+        if (m := PATRON_ADVERTENCIA_INTERCAMBIO_HEADER_RE.match(adv))
+    ]
+    return numeros, url_base
+
+
+def verificar_colisiones_headers(db: Session, url_documento: str) -> dict:
+    """Diagnóstico de solo lectura (no escribe nada): para cada
+    numero_articulo donde _resolver_numeros_duplicados() detecta que la
+    ocurrencia 1 ya almacenada en la BD es en realidad una cita cruzada
+    espuria (ver _parece_inicio_de_titulo) y una ocurrencia posterior es
+    el header real, compara el contenido YA ALMACENADO contra el que lo
+    reemplazaría. Pensado para correr ANTES de
+    aplicar_correccion_colisiones_headers, nunca junto con ella."""
+    numeros, url_base = _numeros_intercambiados_del_documento(url_documento)
+
+    html = descargar_html(url_base)
+    texto = _texto_plano(html)
+    fragmentos = _extraer_articulos(texto)
+    resultado, _ = _resolver_numeros_duplicados(fragmentos)
+    contenido_nuevo_por_numero = dict(resultado)
+
+    casos = []
+    for numero in numeros:
+        url_fuente = f"{url_base}#{numero}"
+        fila_actual = db.query(Norma).filter(Norma.url_fuente == url_fuente).first()
+        texto_nuevo = contenido_nuevo_por_numero.get(numero, "")
+        casos.append(
+            {
+                "numero_articulo": numero,
+                "url_fuente": url_fuente,
+                "fila_actual_existe_en_bd": fila_actual is not None,
+                "id_fila_actual": fila_actual.id if fila_actual else None,
+                "estado_vigencia_actual": fila_actual.estado_vigencia if fila_actual else None,
+                "contenido_actual_a_borrar_primeros_300_chars": (
+                    (fila_actual.texto or "")[:300] if fila_actual else None
+                ),
+                "contenido_nuevo_que_lo_reemplazaria_primeros_300_chars": texto_nuevo[:300],
+                "longitud_contenido_nuevo": len(texto_nuevo),
+            }
+        )
+
+    return {
+        "url_documento": url_base,
+        "total_casos_de_intercambio_real": len(casos),
+        "casos": casos,
+    }
+
+
+def aplicar_correccion_colisiones_headers(db: Session, url_documento: str) -> dict:
+    """Corrige EN LA BD los casos identificados por
+    verificar_colisiones_headers: borra la(s) fila(s) cuyo
+    numero_articulo fue "robado" por una cita cruzada espuria u otro
+    falso positivo de ARTICULO_HEADER_RE, y vuelve a llamar a
+    ingestar_documento() sobre el mismo documento para reinsertar tanto
+    el contenido correcto que debía ocupar ese numero_articulo como
+    cualquier otro fragmento que faltara (duplicados genuinos con sufijo
+    sintético, etc.) — ingestar_documento() es idempotente por
+    url_fuente, así que no reinserta ni modifica nada que ya esté bien.
+
+    Nunca se corre en la misma invocación que verificar_colisiones_headers."""
+    numeros, url_base = _numeros_intercambiados_del_documento(url_documento)
+
+    filas_borradas = []
+    for numero in numeros:
+        url_fuente = f"{url_base}#{numero}"
+        fila = db.query(Norma).filter(Norma.url_fuente == url_fuente).first()
+        if fila is not None:
+            filas_borradas.append({"id": fila.id, "numero_articulo": numero, "url_fuente": url_fuente})
+            db.delete(fila)
+    db.commit()
+
+    insertados, advertencias_ingesta = ingestar_documento(db, url_base)
+
+    return {
+        "url_documento": url_base,
+        "filas_borradas": filas_borradas,
+        "total_filas_borradas": len(filas_borradas),
+        "fragmentos_insertados_tras_reingesta": insertados,
+        "advertencias_reingesta": advertencias_ingesta,
     }
 
 
