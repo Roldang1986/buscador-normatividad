@@ -258,19 +258,184 @@ def _extraer_articulos(texto_completo: str) -> list[tuple[str | None, str]]:
     return fragmentos
 
 
+# --- PROTOTIPO de fragmentación por numeral (no conectado a la ingesta
+# todavía — ver scripts/prototipo_fragmentacion_numeral.py para el
+# dry-run de solo lectura sobre el artículo 879 real) ---
+#
+# Motivación real: el artículo 879 del ET (26,627 caracteres, ~31
+# numerales heterogéneos de exenciones del GMF) quedó fuera del top_k de
+# una pregunta sobre "operaciones simultáneas" pese a contener la
+# respuesta exacta en su numeral 5 — el embedding de TODO el artículo en
+# un solo vector diluye cualquier numeral específico. Ver también
+# scripts/diagnosticar_longitud_fragmentos_et.py: 424, 477, 468-1,
+# 260-11, 260-3 comparten el mismo patrón de riesgo (10,000+ caracteres).
+#
+# Numerales dentro de un artículo del ET, confirmados con el texto real
+# de 879: "12. Las operaciones..." (con punto), "19 <Numeral..." (SIN
+# punto, aparente typo editorial), "PARÁGRAFO 2o. <Parágrafo..." /
+# "PARAGRAFO. El Gravamen...". El número/palabra debe estar al inicio de
+# línea seguido de mayúscula o "<" (nunca texto en minúscula, que
+# indicaría continuación de párrafo, no un numeral nuevo) — mismo
+# principio que _parece_inicio_de_titulo().
+NUMERAL_HEADER_RE = re.compile(r"(?m)^\s*([0-9]{1,3})\.?\s+(?=[<A-ZÁÉÍÓÚÑ])")
+PARAGRAFO_HEADER_RE = re.compile(
+    r"(?mi)^\s*(PAR[ÁA]GRAFO(?:\s+[0-9]+o?)?)\.?\s*(?=[<A-ZÁÉÍÓÚÑ])"
+)
+
+# Fragmentar solo si el artículo es largo Y tiene numerales suficientes
+# para que partirlo tenga sentido natural — ver el análisis de por qué
+# es un AND y no un OR en la propuesta de diseño (un artículo largo sin
+# numerales no tiene por dónde partirse; uno con muchos numerales pero
+# corto no sufre el problema de dilución que esto resuelve). Umbrales
+# provisionales a validar con el dry-run sobre 879 (26,627 caracteres,
+# ~31 numerales) antes de aplicar a otros artículos.
+UMBRAL_LONGITUD_FRAGMENTACION_NUMERAL = 8000
+UMBRAL_NUMERALES_FRAGMENTACION = 10
+
+# Allowlist manual de artículos donde ingestar_documento() aplica de
+# verdad la fragmentación por numeral — deliberadamente NO es "todo
+# artículo que califique por umbral". De los 6 artículos de alto riesgo
+# analizados (879, 424, 477, 468-1, 260-11, 260-3), solo 879 y 477
+# resultaron casos limpios en el dry-run de scripts/prototipo_fragmentacion_numeral.py:
+# - 424: sus numerales son en sí mismos listas arancelarias enormes — la
+#   fragmentación no resuelve su dilución (fragmentos igual de grandes).
+# - 260-11: tiene DOS listas numeradas independientes bajo literales
+#   "A."/"B." (etiquetas de numeral repetidas) — pendiente desambiguador
+#   de namespace por literal (ver LITERAL_HEADER_RE, no implementado
+#   todavía).
+# - 468-1: parágrafos duplicados sin numerar de forma distinguible.
+# - 260-3: no calificó para fragmentar (no cumple ambos umbrales).
+# Agregar un artículo aquí solo tras confirmar con ese mismo dry-run que
+# no tiene ninguno de estos problemas.
+ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {"879", "477"}
+
+
+def _detectar_numerales(texto_articulo: str) -> list[re.Match]:
+    """Devuelve los matches de NUMERAL_HEADER_RE y PARAGRAFO_HEADER_RE
+    dentro de un artículo, ordenados por posición."""
+    matches = list(NUMERAL_HEADER_RE.finditer(texto_articulo)) + list(
+        PARAGRAFO_HEADER_RE.finditer(texto_articulo)
+    )
+    return sorted(matches, key=lambda m: m.start())
+
+
+def _debe_fragmentarse_por_numeral(texto_articulo: str) -> bool:
+    return (
+        len(texto_articulo) > UMBRAL_LONGITUD_FRAGMENTACION_NUMERAL
+        and len(_detectar_numerales(texto_articulo)) >= UMBRAL_NUMERALES_FRAGMENTACION
+    )
+
+
+def _fragmentar_articulo_por_numeral(texto_articulo: str) -> list[tuple[str | None, str]]:
+    """Si texto_articulo cumple _debe_fragmentarse_por_numeral, lo divide
+    en (etiqueta_numeral, texto_del_numeral) — cada fragmento lleva el
+    preámbulo del artículo (título + cualquier texto antes del primer
+    numeral) prefijado, para que conserve contexto temático propio y no
+    dependa de que el agente vea también el artículo completo.
+
+    Si NO cumple el criterio, devuelve [(None, texto_articulo)] sin
+    cambios — misma forma de retorno en ambos casos para uso uniforme
+    por el llamador (ver _extraer_articulos, incluso formato)."""
+    if not _debe_fragmentarse_por_numeral(texto_articulo):
+        return [(None, texto_articulo)]
+
+    matches = _detectar_numerales(texto_articulo)
+    preambulo = texto_articulo[: matches[0].start()].strip()
+
+    fragmentos: list[tuple[str | None, str]] = []
+    for i, m in enumerate(matches):
+        inicio = m.start()
+        fin = matches[i + 1].start() if i + 1 < len(matches) else len(texto_articulo)
+        etiqueta = m.group(1).strip()
+        cuerpo_numeral = texto_articulo[inicio:fin].strip()
+        texto_fragmento = f"{preambulo}\n\n{cuerpo_numeral}" if preambulo else cuerpo_numeral
+        fragmentos.append((etiqueta, texto_fragmento))
+    return fragmentos
+
+
+# Firma real (evidencia: estatuto_tributario.htm) de un anexo de "valores
+# absolutos reexpresados en UVT" al final del ET, que produce MUCHOS
+# falsos positivos de ARTICULO_HEADER_RE (numero_articulo '476', '499',
+# '521', '523', '544', '545', '7', y probablemente más): filas de tabla
+# como "NUMERAL 21 E.T.\n...\n17\nPRIMER VALOR\n3.576.812.000\n180.000",
+# "E.T.\n71.000\n4" o "LITERAL b) y d)\n2\n816.000\n41" — todas empiezan
+# con mayúscula (igual que un título real), por eso "empieza en
+# mayúscula" solo NO alcanza para distinguirlas de un header real.
+_PATRON_FILA_TABLA_UVT_RE = re.compile(
+    r"^(?:E\.T\.|NUMERAL\s+\d|LITERAL\s+[a-záéíóúñ]\))", re.IGNORECASE
+)
+_PATRON_NUMERO_CON_SEPARADOR_MILES_RE = re.compile(r"\d{1,3}(?:\.\d{3})+")
+
+
+def _parece_inicio_de_titulo(texto_fragmento: str) -> bool:
+    """True si, justo después del número de artículo que hizo matchear
+    ARTICULO_HEADER_RE, sigue algo que parece el título real de un
+    artículo — confirmado en decenas de ejemplos reales a lo largo de
+    esta sesión (todos los títulos reales vistos: "HECHO GENERADOR DEL
+    GMF.", "SERVICIOS EXCLUIDOS DEL IMPUESTO SOBRE LAS VENTAS -IVA-.",
+    "TARIFA GENERAL PARA PERSONAS JURÍDICAS.", etc.) empiezan en
+    mayúscula y sostienen un mínimo de texto de título antes de saltar de
+    línea o toparse con un dígito suelto.
+
+    Evidencia real del caso que motivó esto: en estatuto_tributario.htm,
+    numero_articulo '476' aparece 3 veces — la 1a es una cita cruzada
+    espuria dentro de OTRO artículo ("...conforme al artículo 476
+    numeral 6o, el impuesto se liquidará...", cuerpo en minúscula), la 2a
+    es el header real ("SERVICIOS EXCLUIDOS DEL IMPUESTO SOBRE LAS VENTAS
+    -IVA-.", con sus 31 numerales), y la 3a es una fila del anexo de
+    valores UVT ("NUMERAL 21 E.T....") que SÍ empieza en mayúscula.
+
+    UN PRIMER INTENTO que solo chequeaba "empieza en mayúscula" falló en
+    los dos sentidos con datos reales: no distinguía la 2a ocurrencia
+    real de la 3a espuria del 476 (ambigüedad → no corregía nada), Y
+    producía un falso positivo en numero_articulo '7' (dos filas de la
+    misma tabla UVT, "ART. 7\\n7\\n2.856.000..." y "ART. \\n7\\n LITERAL
+    b) y d)\\n2\\n816.000...", donde la segunda —igual de espuria—
+    empieza en mayúscula y "ganaba" por parecer más título). De ahí los
+    dos chequeos adicionales: excluir explícitamente la firma de esa
+    tabla, y exigir un mínimo de texto de título antes del primer salto
+    de línea o dígito."""
+    m = ARTICULO_HEADER_RE.match(texto_fragmento)
+    cuerpo = texto_fragmento[m.end():].lstrip() if m else texto_fragmento.lstrip()
+    if not cuerpo or not cuerpo[0].isalpha() or not cuerpo[0].isupper():
+        return False
+
+    ventana = cuerpo[:150]
+    if _PATRON_FILA_TABLA_UVT_RE.match(ventana):
+        return False
+    if _PATRON_NUMERO_CON_SEPARADOR_MILES_RE.search(ventana):
+        return False
+
+    corte = re.search(r"[\n0-9]", ventana)
+    largo_titulo = corte.start() if corte else len(ventana)
+    return largo_titulo >= 15
+
+
 def _resolver_numeros_duplicados(
     fragmentos: list[tuple[str | None, str]],
 ) -> tuple[list[tuple[str | None, str]], list[str]]:
     """Resuelve numero_articulo duplicados dentro del mismo documento —
     confirmado con datos reales que ocurre en documentos consolidados
-    grandes (5 de 2147 en decreto_1625_2016.htm), no por un bug de
-    ARTICULO_HEADER_RE sino por errores/renumeraciones reales del
-    decreto original, marcados por el compilador. Sin esto,
-    ingestar_documento() perdería silenciosamente el segundo artículo de
-    cada par como falso "duplicado" (mismo url_fuente).
+    grandes (5 de 2147 en decreto_1625_2016.htm) por errores/renumeraciones
+    reales del decreto original marcados por el compilador, Y (evidencia
+    real en estatuto_tributario.htm) por falsos positivos de
+    ARTICULO_HEADER_RE sobre citas cruzadas cuyo número referenciado cae
+    en su propia línea. Sin esto, ingestar_documento() perdería
+    silenciosamente el segundo artículo de cada par como falso
+    "duplicado" (mismo url_fuente) — o, peor, en el caso de un falso
+    positivo que aparece ANTES del header real (caso '476'), se quedaría
+    con la cita espuria y perdería el artículo real por completo.
 
-    Deja el primer artículo con cada numero_articulo tal cual. Para cada
-    ocurrencia posterior con el mismo número, en orden de prioridad:
+    Decide primero cuál ocurrencia se queda con el numero_articulo plano
+    (normalmente la 1a, salvo que la 1a NO parezca un título real de
+    artículo — ver _parece_inicio_de_titulo — y exactamente UNA ocurrencia
+    posterior sí lo parezca; en ese caso, esa posterior pasa a ser la
+    "primaria" y la 1a se resuelve como cualquier otra ocurrencia no
+    primaria). Ante cualquier ambigüedad (ninguna o más de una ocurrencia
+    parecen título real) se mantiene el comportamiento conservador
+    anterior: la 1a ocurrencia es la primaria, sin adivinar.
+
+    Para cada ocurrencia que NO sea la primaria, en orden de prioridad:
 
     1. Si el propio texto trae una corrección explícita del compilador
        ("<sic, es X>" — error tipográfico, o "...renumerado...
@@ -284,19 +449,34 @@ def _resolver_numeros_duplicados(
        es un stub/referencia a contenido reubicado, no un artículo
        nuevo — se omite en vez de insertarla como duplicado vacío.
     3. Si no hay ninguna corrección explícita en el texto (duplicado
-       genuino sin resolver por la fuente): se usa un identificador
-       sintético "{numero}-dupN" que NO corresponde a ningún ancla real
-       de la página — se documenta así en la advertencia en vez de
-       aparentar ser una URL válida.
+       genuino sin resolver por la fuente, o una cita cruzada espuria
+       sin utilidad propia): se usa un identificador sintético
+       "{numero}-dupN" que NO corresponde a ningún ancla real de la
+       página — se documenta así en la advertencia en vez de aparentar
+       ser una URL válida.
 
     Devuelve (fragmentos_resueltos, advertencias) — las advertencias se
     agregan a las de ingestar_documento() para que queden visibles en el
     resumen del scraper, no silenciadas."""
     conteo = Counter(n for n, _ in fragmentos if n is not None)
     numeros_usados = set(conteo)
+    advertencias: list[str] = []
+
+    ocurrencias_por_numero: dict[str, list[str]] = {}
+    for numero, texto in fragmentos:
+        if numero is not None and conteo[numero] > 1:
+            ocurrencias_por_numero.setdefault(numero, []).append(texto)
+
+    primaria_por_numero: dict[str, int] = {}
+    for numero, textos in ocurrencias_por_numero.items():
+        parecen_titulo = [_parece_inicio_de_titulo(t) for t in textos]
+        if not parecen_titulo[0] and sum(parecen_titulo) == 1:
+            primaria_por_numero[numero] = parecen_titulo.index(True) + 1
+        else:
+            primaria_por_numero[numero] = 1
+
     vistos_por_numero: dict[str, int] = {}
     resultado: list[tuple[str | None, str]] = []
-    advertencias: list[str] = []
 
     for numero, texto in fragmentos:
         if numero is None or conteo[numero] <= 1:
@@ -305,7 +485,17 @@ def _resolver_numeros_duplicados(
 
         vistos_por_numero[numero] = vistos_por_numero.get(numero, 0) + 1
         ocurrencia = vistos_por_numero[numero]
-        if ocurrencia == 1:
+        if ocurrencia == primaria_por_numero[numero]:
+            if ocurrencia != 1:
+                advertencias.append(
+                    f"numero_articulo {numero!r}: la ocurrencia 1 no parece un "
+                    "encabezado real de artículo (el texto que sigue al número "
+                    "no empieza en mayúscula — probable cita cruzada espuria "
+                    "capturada por ARTICULO_HEADER_RE), mientras que la "
+                    f"ocurrencia {ocurrencia} sí parece un título real — se le "
+                    "asigna el numero_articulo plano a esta última en vez de a "
+                    "la primera."
+                )
             resultado.append((numero, texto))
             continue
 
@@ -343,6 +533,16 @@ def _resolver_numeros_duplicados(
             numeros_usados.add(sufijo)
 
     return resultado, advertencias
+
+
+# Patrón de la advertencia que _resolver_numeros_duplicados() emite
+# cuando intercambia cuál ocurrencia se queda con el numero_articulo
+# plano (ver _parece_inicio_de_titulo) — compartido entre el diagnóstico
+# de solo lectura y la corrección de escritura para no duplicar el texto
+# exacto en dos lugares.
+PATRON_ADVERTENCIA_INTERCAMBIO_HEADER_RE = re.compile(
+    r"^numero_articulo '([^']+)': la ocurrencia 1 no parece un encabezado real"
+)
 
 
 def _estado_y_nota_vigencia(texto_articulo: str) -> tuple[str, str | None]:
@@ -854,6 +1054,294 @@ def verificar_icono_vs_texto(db: Session, seccion_titulo: str, limite: int | Non
     }
 
 
+def _filas_a_corregir_por_asimetria_documento_simple(db: Session, seccion_titulo: str, limite: int | None) -> list[dict]:
+    """Lógica compartida de solo lectura entre
+    verificar_correccion_documentos_simples_derogados y
+    aplicar_correccion_documentos_simples_derogados: vuelve a descubrir
+    los documentos de `seccion_titulo`, y para cada uno con
+    indice_marca_derogado=True y _es_documento_simple_atomico(...)=True
+    (según los numero_articulo YA almacenados en la BD para ese
+    documento), identifica las filas cuyo estado_vigencia actual no es ya
+    "derogado" — exactamente el mismo criterio que aplica
+    ingestar_documento de forma prospectiva a partir de ahora, aplicado
+    aquí de forma retroactiva a filas insertadas antes de este ajuste."""
+    documentos = descubrir_urls_seccion(seccion_titulo, limite=limite)
+    filas_a_corregir = []
+    for doc in documentos:
+        if doc.indice_marca_derogado is not True:
+            continue
+        url_base = doc.url.split("#")[0]
+        fragmentos = db.query(Norma).filter(Norma.url_fuente.like(f"{url_base}%")).all()
+        if not fragmentos:
+            continue
+        if not _es_documento_simple_atomico([f.numero_articulo for f in fragmentos], len(fragmentos)):
+            continue
+        for f in fragmentos:
+            if f.estado_vigencia != "derogado":
+                filas_a_corregir.append(
+                    {
+                        "id": f.id,
+                        "url_fuente": f.url_fuente,
+                        "titulo_documento": doc.titulo,
+                        "estado_actual": f.estado_vigencia,
+                        "nota_actual": f.nota_vigencia,
+                        "total_fragmentos_documento": len(fragmentos),
+                    }
+                )
+    return filas_a_corregir
+
+
+def verificar_correccion_documentos_simples_derogados(db: Session, seccion_titulo: str, limite: int | None = None) -> dict:
+    """Diagnóstico de solo lectura (no escribe nada): reporta, para
+    `seccion_titulo`, cuántas filas YA insertadas quedarían corregidas de
+    estado_vigencia a "derogado" bajo la nueva regla de la asimetría
+    índice-vs-texto en documentos simples/atómicos (ver docstring de
+    ingestar_documento). Pensado para correr ANTES de
+    aplicar_correccion_documentos_simples_derogados, nunca junto con ella
+    en la misma invocación."""
+    filas = _filas_a_corregir_por_asimetria_documento_simple(db, seccion_titulo, limite)
+    return {
+        "seccion": seccion_titulo,
+        "filas_a_corregir": len(filas),
+        "detalle": filas,
+    }
+
+
+def aplicar_correccion_documentos_simples_derogados(db: Session, seccion_titulo: str, limite: int | None = None) -> dict:
+    """Corrige EN EL LUGAR (solo estado_vigencia y nota_vigencia, nunca
+    url_fuente/texto/embedding) las filas identificadas por
+    verificar_correccion_documentos_simples_derogados. Nunca se corre en
+    la misma invocación que el diagnóstico de solo lectura."""
+    filas = _filas_a_corregir_por_asimetria_documento_simple(db, seccion_titulo, limite)
+    actualizadas = 0
+    for fila in filas:
+        norma = db.query(Norma).get(fila["id"])
+        norma.estado_vigencia = "derogado"
+        if not norma.nota_vigencia:
+            norma.nota_vigencia = (
+                "Documento marcado como derogado en el índice de "
+                "normograma (ícono de vigencia); el texto de este "
+                "artículo no traía nota de vigencia propia — se usa el "
+                "índice como fuente de verdad por tratarse de un "
+                "documento corto/atómico (ver asimetría documentada en "
+                "ingestar_documento)."
+            )
+        actualizadas += 1
+    db.commit()
+    return {
+        "seccion": seccion_titulo,
+        "filas_revisadas": len(filas),
+        "filas_actualizadas": actualizadas,
+    }
+
+
+def _numeros_intercambiados_del_documento(url_documento: str) -> tuple[list[str], str]:
+    """Descarga el documento real, aplica _extraer_articulos +
+    _resolver_numeros_duplicados() (ya con _parece_inicio_de_titulo) y
+    devuelve los numero_articulo donde la ocurrencia 1 quedó desplazada
+    por una posterior que sí parece un header real — ver
+    PATRON_ADVERTENCIA_INTERCAMBIO_HEADER_RE. Devuelve también url_base
+    (documento sin fragmento #) para construir url_fuente."""
+    url_base = url_documento.split("#")[0]
+    html = descargar_html(url_base)
+    texto = _texto_plano(html)
+    fragmentos = _extraer_articulos(texto)
+    _, advertencias = _resolver_numeros_duplicados(fragmentos)
+    numeros = [
+        m.group(1)
+        for adv in advertencias
+        if (m := PATRON_ADVERTENCIA_INTERCAMBIO_HEADER_RE.match(adv))
+    ]
+    return numeros, url_base
+
+
+def verificar_colisiones_headers(db: Session, url_documento: str) -> dict:
+    """Diagnóstico de solo lectura (no escribe nada): para cada
+    numero_articulo donde _resolver_numeros_duplicados() detecta que la
+    ocurrencia 1 ya almacenada en la BD es en realidad una cita cruzada
+    espuria (ver _parece_inicio_de_titulo) y una ocurrencia posterior es
+    el header real, compara el contenido YA ALMACENADO contra el que lo
+    reemplazaría. Pensado para correr ANTES de
+    aplicar_correccion_colisiones_headers, nunca junto con ella."""
+    numeros, url_base = _numeros_intercambiados_del_documento(url_documento)
+
+    html = descargar_html(url_base)
+    texto = _texto_plano(html)
+    fragmentos = _extraer_articulos(texto)
+    resultado, _ = _resolver_numeros_duplicados(fragmentos)
+    contenido_nuevo_por_numero = dict(resultado)
+
+    casos = []
+    for numero in numeros:
+        url_fuente = f"{url_base}#{numero}"
+        fila_actual = db.query(Norma).filter(Norma.url_fuente == url_fuente).first()
+        texto_nuevo = contenido_nuevo_por_numero.get(numero, "")
+        casos.append(
+            {
+                "numero_articulo": numero,
+                "url_fuente": url_fuente,
+                "fila_actual_existe_en_bd": fila_actual is not None,
+                "id_fila_actual": fila_actual.id if fila_actual else None,
+                "estado_vigencia_actual": fila_actual.estado_vigencia if fila_actual else None,
+                "contenido_actual_a_borrar_primeros_300_chars": (
+                    (fila_actual.texto or "")[:300] if fila_actual else None
+                ),
+                "contenido_nuevo_que_lo_reemplazaria_primeros_300_chars": texto_nuevo[:300],
+                "longitud_contenido_nuevo": len(texto_nuevo),
+            }
+        )
+
+    return {
+        "url_documento": url_base,
+        "total_casos_de_intercambio_real": len(casos),
+        "casos": casos,
+    }
+
+
+def aplicar_correccion_colisiones_headers(db: Session, url_documento: str) -> dict:
+    """Corrige EN LA BD los casos identificados por
+    verificar_colisiones_headers: borra la(s) fila(s) cuyo
+    numero_articulo fue "robado" por una cita cruzada espuria u otro
+    falso positivo de ARTICULO_HEADER_RE, y vuelve a llamar a
+    ingestar_documento() sobre el mismo documento para reinsertar tanto
+    el contenido correcto que debía ocupar ese numero_articulo como
+    cualquier otro fragmento que faltara (duplicados genuinos con sufijo
+    sintético, etc.) — ingestar_documento() es idempotente por
+    url_fuente, así que no reinserta ni modifica nada que ya esté bien.
+
+    Nunca se corre en la misma invocación que verificar_colisiones_headers."""
+    numeros, url_base = _numeros_intercambiados_del_documento(url_documento)
+
+    filas_borradas = []
+    for numero in numeros:
+        url_fuente = f"{url_base}#{numero}"
+        fila = db.query(Norma).filter(Norma.url_fuente == url_fuente).first()
+        if fila is not None:
+            filas_borradas.append({"id": fila.id, "numero_articulo": numero, "url_fuente": url_fuente})
+            db.delete(fila)
+    db.commit()
+
+    insertados, advertencias_ingesta = ingestar_documento(db, url_base)
+
+    return {
+        "url_documento": url_base,
+        "filas_borradas": filas_borradas,
+        "total_filas_borradas": len(filas_borradas),
+        "fragmentos_insertados_tras_reingesta": insertados,
+        "advertencias_reingesta": advertencias_ingesta,
+    }
+
+
+def verificar_fragmentacion_numeral(db: Session, url_documento: str, articulos: list[str]) -> dict:
+    """Diagnóstico de solo lectura (no escribe nada): para cada
+    numero_articulo en `articulos` (se espera que ya estén en
+    ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA), compara la fila
+    ÚNICA actual en BD (url_fuente=url#numero, el artículo completo sin
+    fragmentar) contra los fragmentos por numeral que produciría
+    reingerir con la fragmentación habilitada. Pensado para correr ANTES
+    de aplicar_fragmentacion_numeral, nunca junto con ella."""
+    url_base = url_documento.split("#")[0]
+    html = descargar_html(url_base)
+    texto = _texto_plano(html)
+    fragmentos = _extraer_articulos(texto)
+    fragmentos, _ = _resolver_numeros_duplicados(fragmentos)
+    texto_por_numero = dict(fragmentos)
+
+    casos = []
+    for numero in articulos:
+        url_fuente = f"{url_base}#{numero}"
+        fila_actual = db.query(Norma).filter(Norma.url_fuente == url_fuente).first()
+        texto_articulo = texto_por_numero.get(numero)
+        if texto_articulo is None:
+            casos.append({"numero_articulo": numero, "error": "no encontrado en el documento real"})
+            continue
+        califica = _debe_fragmentarse_por_numeral(texto_articulo)
+        nuevos_fragmentos = _fragmentar_articulo_por_numeral(texto_articulo)
+        casos.append(
+            {
+                "numero_articulo": numero,
+                "url_fuente_actual": url_fuente,
+                "fila_actual_existe_en_bd": fila_actual is not None,
+                "id_fila_actual": fila_actual.id if fila_actual else None,
+                "longitud_fila_actual": len(fila_actual.texto) if fila_actual else None,
+                "califica_para_fragmentar": califica,
+                "fragmentos_nuevos": len(nuevos_fragmentos) if califica else 1,
+                "etiquetas_nuevas": [e for e, _ in nuevos_fragmentos] if califica else [None],
+            }
+        )
+
+    return {"url_documento": url_base, "casos": casos}
+
+
+def aplicar_fragmentacion_numeral(db: Session, url_documento: str, articulos: list[str]) -> dict:
+    """MODO DE ESCRITURA: borra la fila ÚNICA actual (url_fuente=url#numero)
+    de cada numero_articulo en `articulos`, y vuelve a llamar a
+    ingestar_documento() sobre el mismo documento — que, con
+    ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA ya incluyendo esos
+    números, reinsertará cada uno como varias filas (una por numeral) en
+    vez de una sola. ingestar_documento() es idempotente por url_fuente,
+    así que no reinserta ni modifica ningún otro artículo que ya exista.
+
+    Requiere que la columna `numeral` ya exista en la BD (alembic upgrade
+    head con la migración 0002 aplicada) — de lo contrario la inserción
+    fallará.
+
+    Nunca se corre en la misma invocación que verificar_fragmentacion_numeral."""
+    url_base = url_documento.split("#")[0]
+
+    filas_borradas = []
+    for numero in articulos:
+        url_fuente = f"{url_base}#{numero}"
+        fila = db.query(Norma).filter(Norma.url_fuente == url_fuente).first()
+        if fila is not None:
+            filas_borradas.append({"id": fila.id, "numero_articulo": numero, "url_fuente": url_fuente})
+            db.delete(fila)
+    db.commit()
+
+    insertados, advertencias_ingesta = ingestar_documento(db, url_base)
+
+    return {
+        "url_documento": url_base,
+        "filas_borradas": filas_borradas,
+        "total_filas_borradas": len(filas_borradas),
+        "fragmentos_insertados_tras_reingesta": insertados,
+        "advertencias_reingesta": advertencias_ingesta,
+    }
+
+
+# Umbral de "pocos artículos" para la asimetría de confiabilidad
+# índice-vs-texto documentada abajo. Elegido para separar claramente
+# decretos modificatorios cortos (evidencia real: decreto_0165_2024.htm,
+# decreto_0771_2025.htm, etc., todos con menos de 10 artículos) de
+# códigos compilados grandes (decreto_1625_2016.htm: 2421 fragmentos;
+# Estatuto Tributario: 1000+), sin depender de un número exacto.
+UMBRAL_FRAGMENTOS_DOCUMENTO_SIMPLE = 20
+
+
+def _es_documento_simple_atomico(numeros_articulo: list[str | None], total_fragmentos: int) -> bool:
+    """True si el documento es "corto/atómico" en el sentido de la
+    asimetría de confiabilidad índice-vs-texto (ver docstring de
+    ingestar_documento): pocos artículos, o ninguno con numeración
+    jerárquica profunda tipo Decreto Único Reglamentario (p. ej.
+    "1.2.1.7.1", con varios puntos). Para esos documentos, confirmado con
+    evidencia real (decreto_0165_2024.htm figura "(DEROGADO)" en su
+    propio título de normograma sin que ninguno de sus artículos traiga
+    nota de vigencia retroactiva), el ícono del índice es MÁS confiable
+    que la ausencia de nota en el texto.
+
+    Se usa tanto al ingerir (con los fragmentos recién extraídos) como al
+    corregir registros ya insertados (con los numero_articulo ya
+    almacenados en la BD para ese documento) — ver
+    verificar_correccion_documentos_simples_derogados /
+    aplicar_correccion_documentos_simples_derogados."""
+    if total_fragmentos < UMBRAL_FRAGMENTOS_DOCUMENTO_SIMPLE:
+        return True
+    tiene_numeracion_jerarquica_profunda = any(
+        numero and numero.count(".") >= 2 for numero in numeros_articulo
+    )
+    return not tiene_numeracion_jerarquica_profunda
+
+
 def ingestar_documento(
     db: Session,
     url: str,
@@ -891,7 +1379,22 @@ def ingestar_documento(
     nunca está "derogado"), comparar ese único valor contra cada uno de
     sus ~1000+ artículos —muchos legítimamente derogados/modificados en
     el texto— generará muchas advertencias esperables, no indicativas de
-    un bug. Revisar el volumen de advertencias con ese contexto."""
+    un bug. Revisar el volumen de advertencias con ese contexto.
+
+    ASIMETRÍA CONFIRMADA (evidencia real, sección "1.3. Decreto Único
+    Reglamentario en Materia Tributaria", 5 documentos: decreto_0771_2025,
+    decreto_0174_2025, decreto_1006_2024, decreto_0165_2024,
+    decreto_0128_2024): para decretos modificatorios CORTOS (pocos
+    artículos, sin numeración jerárquica profunda tipo DUR), es el ÍCONO
+    del índice el que es más confiable, no el texto — decreto_0165_2024.htm
+    figura "(DEROGADO)" en su propio título de normograma, pero ninguno de
+    sus artículos individuales trae nota de vigencia retroactiva en el
+    texto (a diferencia de códigos compilados grandes como el ET o el
+    Decreto 1625, que sí reciben notas por artículo). Por eso, cuando
+    `indice_marca_derogado=True` y `_es_documento_simple_atomico(...)` es
+    True, el índice se usa como fuente de verdad y se fuerza
+    estado_vigencia="derogado" si el texto no traía ya su propia nota
+    (nunca se sobrescribe un estado ya derivado del texto)."""
     html = descargar_html(url)
     texto_completo = _texto_plano(html)
     tipo_norma = _tipo_norma_desde_url(url)
@@ -900,46 +1403,85 @@ def ingestar_documento(
     if limite_fragmentos is not None:
         fragmentos = fragmentos[:limite_fragmentos]
 
+    documento_simple = _es_documento_simple_atomico(
+        [n for n, _ in fragmentos], len(fragmentos)
+    )
+
+    url_base = url.split("#")[0]
     insertados = 0
-    for numero_articulo, texto in fragmentos:
-        if not texto or len(texto) < 20:
+    for numero_articulo, texto_articulo in fragmentos:
+        if not texto_articulo or len(texto_articulo) < 20:
             continue
 
-        url_base = url.split("#")[0]
-        url_fuente = f"{url_base}#{numero_articulo}" if numero_articulo else url_base
-        if _norma_existe(db, url_fuente):
-            logger.info("Ya existe, se omite: %s", url_fuente)
-            continue
+        # Fragmentación por numeral (ver ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA):
+        # solo para el puñado de artículos ya confirmados como casos
+        # limpios se reemplaza la fila única por varias (una por
+        # numeral/parágrafo) — el resto del ET sigue insertándose como
+        # una sola fila por numero_articulo, igual que siempre.
+        if (
+            numero_articulo in ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA
+            and _debe_fragmentarse_por_numeral(texto_articulo)
+        ):
+            sub_fragmentos = _fragmentar_articulo_por_numeral(texto_articulo)
+        else:
+            sub_fragmentos = [(None, texto_articulo)]
 
-        estado_vigencia, nota_vigencia = _estado_y_nota_vigencia(texto)
-        fuente = _fuente_desde_url(url, tipo_norma, numero_articulo)
+        for numeral, texto in sub_fragmentos:
+            url_fuente = f"{url_base}#{numero_articulo}" if numero_articulo else url_base
+            if numeral:
+                url_fuente = f"{url_fuente}#{numeral}"
+            if _norma_existe(db, url_fuente):
+                logger.info("Ya existe, se omite: %s", url_fuente)
+                continue
 
-        if indice_marca_derogado is not None:
-            texto_dice_derogado = estado_vigencia == "derogado"
-            if texto_dice_derogado != indice_marca_derogado:
-                advertencias.append(
-                    f"{url_fuente}: el índice marca "
-                    f"{'derogado' if indice_marca_derogado else 'no derogado'} "
-                    f"pero el texto sugiere estado_vigencia={estado_vigencia!r} "
-                    "— revisar manualmente."
-                )
+            estado_vigencia, nota_vigencia = _estado_y_nota_vigencia(texto)
+            fuente = _fuente_desde_url(url, tipo_norma, numero_articulo)
+            if numeral:
+                fuente = f"{fuente}, numeral {numeral}"
 
-        embedding = embed_document(texto)
+            if indice_marca_derogado is not None:
+                texto_dice_derogado = estado_vigencia == "derogado"
+                if indice_marca_derogado and documento_simple and not texto_dice_derogado:
+                    estado_vigencia = "derogado"
+                    nota_vigencia = nota_vigencia or (
+                        "Documento marcado como derogado en el índice de "
+                        "normograma (ícono de vigencia); el texto de este "
+                        "artículo no traía nota de vigencia propia — se usa "
+                        "el índice como fuente de verdad por tratarse de un "
+                        "documento corto/atómico (ver asimetría documentada "
+                        "en ingestar_documento)."
+                    )
+                    advertencias.append(
+                        f"{url_fuente}: estado_vigencia corregido a 'derogado' "
+                        "según el ícono del índice (documento corto/atómico "
+                        "sin numeración jerárquica profunda) — el texto no "
+                        "traía nota de vigencia propia."
+                    )
+                elif texto_dice_derogado != indice_marca_derogado:
+                    advertencias.append(
+                        f"{url_fuente}: el índice marca "
+                        f"{'derogado' if indice_marca_derogado else 'no derogado'} "
+                        f"pero el texto sugiere estado_vigencia={estado_vigencia!r} "
+                        "— revisar manualmente."
+                    )
 
-        norma = Norma(
-            tipo_norma=tipo_norma,
-            numero_articulo=numero_articulo,
-            fuente=fuente,
-            url_fuente=url_fuente,
-            texto=texto,
-            estado_vigencia=estado_vigencia,
-            nota_vigencia=nota_vigencia,
-            embedding=embedding,
-        )
-        db.add(norma)
-        db.commit()
-        insertados += 1
-        time.sleep(REQUEST_DELAY_SECONDS)
+            embedding = embed_document(texto)
+
+            norma = Norma(
+                tipo_norma=tipo_norma,
+                numero_articulo=numero_articulo,
+                numeral=numeral,
+                fuente=fuente,
+                url_fuente=url_fuente,
+                texto=texto,
+                estado_vigencia=estado_vigencia,
+                nota_vigencia=nota_vigencia,
+                embedding=embedding,
+            )
+            db.add(norma)
+            db.commit()
+            insertados += 1
+            time.sleep(REQUEST_DELAY_SECONDS)
 
     return insertados, advertencias
 

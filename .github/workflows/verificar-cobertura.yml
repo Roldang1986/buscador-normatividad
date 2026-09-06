@@ -1,0 +1,39 @@
+name: Verificar cobertura de indexación de un documento
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL del documento a verificar (ej. .../estatuto_tributario.htm)"
+        required: true
+      articulo:
+        description: "numero_articulo puntual a verificar (opcional, ej. 879)"
+        required: false
+        default: ""
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Verificar cobertura (solo lectura, sin Playwright)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.url }}
+          ARTICULO: ${{ github.event.inputs.articulo }}
+        run: |
+          ARGS=(scripts/verificar_cobertura_documento.py "$URL_DOCUMENTO")
+          if [ -n "$ARTICULO" ]; then
+            ARGS+=(--articulo "$ARTICULO")
+          fi
+          python "${ARGS[@]}"

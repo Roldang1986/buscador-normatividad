@@ -12,11 +12,13 @@ import pathlib
 
 from app.database import SessionLocal
 from app.ingest.dian_scraper import (
+    aplicar_correccion_documentos_simples_derogados,
     aplicar_correccion_vigencia,
     contar_marca_derogado,
     descubrir_urls_seccion,
     limpiar_numeros_articulo_truncados,
     scrapear_seccion,
+    verificar_correccion_documentos_simples_derogados,
     verificar_icono_vs_texto,
     verificar_numeracion_articulos,
     verificar_vigencia_texto_almacenado,
@@ -124,6 +126,31 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--solo-verificar-asimetria-derogado",
+        action="store_true",
+        help=(
+            "No inserta ni modifica nada en la BD: para 'seccion', reporta "
+            "cuántas filas YA insertadas quedarían corregidas a "
+            "estado_vigencia='derogado' bajo la asimetría índice-vs-texto "
+            "en documentos simples/atómicos (indice_marca_derogado=True + "
+            "pocos artículos o sin numeración jerárquica profunda, ver "
+            "docstring de ingestar_documento). Usa 'seccion' y '--limite' "
+            "igual que --solo-descubrir."
+        ),
+    )
+    parser.add_argument(
+        "--corregir-asimetria-derogado",
+        action="store_true",
+        help=(
+            "MODO DE ESCRITURA: aplica en la BD, para 'seccion', la "
+            "corrección calculada por "
+            "verificar_correccion_documentos_simples_derogados(). Solo "
+            "toca estado_vigencia/nota_vigencia. Correr "
+            "--solo-verificar-asimetria-derogado primero — no se puede "
+            "combinar con él en la misma corrida."
+        ),
+    )
+    parser.add_argument(
         "--solo-descubrir",
         action="store_true",
         help=(
@@ -144,15 +171,27 @@ def main() -> None:
             "muestra, y solo después corré --corregir-vigencia por separado."
         )
 
+    if args.solo_verificar_asimetria_derogado and args.corregir_asimetria_derogado:
+        parser.error(
+            "--solo-verificar-asimetria-derogado y "
+            "--corregir-asimetria-derogado no se pueden combinar: corré "
+            "primero el modo de solo lectura, revisá el detalle, y solo "
+            "después corré --corregir-asimetria-derogado por separado."
+        )
+
     if (
         not args.solo_verificar_numeracion
         and not args.solo_verificar_vigencia
         and not args.corregir_vigencia
+        and not args.solo_verificar_asimetria_derogado
+        and not args.corregir_asimetria_derogado
         and not args.seccion
     ):
         parser.error(
             "'seccion' es obligatorio salvo con --solo-verificar-numeracion, "
-            "--solo-verificar-vigencia o --corregir-vigencia"
+            "--solo-verificar-vigencia, --corregir-vigencia, "
+            "--solo-verificar-asimetria-derogado o "
+            "--corregir-asimetria-derogado"
         )
 
     if args.capturas_dir:
@@ -202,6 +241,22 @@ def main() -> None:
             diagnostico = verificar_icono_vs_texto(db, args.seccion, limite=args.limite)
             print("\n=== Ícono del índice vs. estado_vigencia ya corregido ===")
             print(json.dumps(diagnostico, indent=2, ensure_ascii=False))
+            return
+
+        if args.solo_verificar_asimetria_derogado:
+            diagnostico = verificar_correccion_documentos_simples_derogados(
+                db, args.seccion, limite=args.limite
+            )
+            print("\n=== Diagnóstico de asimetría índice-vs-texto (documentos simples/atómicos) ===")
+            print(json.dumps(diagnostico, indent=2, ensure_ascii=False))
+            return
+
+        if args.corregir_asimetria_derogado:
+            resultado = aplicar_correccion_documentos_simples_derogados(
+                db, args.seccion, limite=args.limite
+            )
+            print("\n=== Corrección de asimetría índice-vs-texto aplicada ===")
+            print(json.dumps(resultado, indent=2, ensure_ascii=False))
             return
 
         if args.limpiar_truncados:
