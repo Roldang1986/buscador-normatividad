@@ -40,6 +40,11 @@ on:
         required: false
         type: boolean
         default: false
+      verificar_icono_vs_texto:
+        description: "No modifica la BD: vuelve a descubrir los documentos de 'seccion' (ícono ya corregido, span) y compara indice_marca_derogado contra el estado_vigencia ya corregido de sus fragmentos almacenados. Imprime el conteo del ícono y los casos puntuales de desacuerdo."
+        required: false
+        type: boolean
+        default: false
       diagnosticar_caso_vigencia:
         description: "Diagnóstico de solo lectura para el caso confirmado ley_1943_2018.htm (INEXEQUIBLE, ícono rojo derogado): descarga el texto real para ver el patrón de vigencia, y compara el markup de su enlace contra uno vigente en el HTML ya volcado. No inserta nada en la BD."
         required: false
@@ -80,6 +85,7 @@ jobs:
           SOLO_VERIFICAR_VIGENCIA: ${{ github.event.inputs.solo_verificar_vigencia }}
           CORREGIR_VIGENCIA: ${{ github.event.inputs.corregir_vigencia }}
           SOLO_DESCUBRIR: ${{ github.event.inputs.solo_descubrir }}
+          VERIFICAR_ICONO_VS_TEXTO: ${{ github.event.inputs.verificar_icono_vs_texto }}
         run: |
           ARGS=(scripts/run_dian_scraper.py "$SECCION" --limite "$LIMITE" --capturas-dir scraper-debug)
           if [ -n "$LIMITE_FRAGMENTOS" ]; then
@@ -99,6 +105,9 @@ jobs:
           fi
           if [ "$SOLO_DESCUBRIR" = "true" ]; then
             ARGS+=(--solo-descubrir)
+          fi
+          if [ "$VERIFICAR_ICONO_VS_TEXTO" = "true" ]; then
+            ARGS+=(--verificar-icono-vs-texto)
           fi
           python "${ARGS[@]}"
 

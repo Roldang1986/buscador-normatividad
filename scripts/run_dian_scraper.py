@@ -17,6 +17,7 @@ from app.ingest.dian_scraper import (
     descubrir_urls_seccion,
     limpiar_numeros_articulo_truncados,
     scrapear_seccion,
+    verificar_icono_vs_texto,
     verificar_numeracion_articulos,
     verificar_vigencia_texto_almacenado,
 )
@@ -109,6 +110,20 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--verificar-icono-vs-texto",
+        action="store_true",
+        help=(
+            "No inserta ni modifica nada en la BD: vuelve a descubrir los "
+            "documentos de 'seccion' (con el heurístico de ícono ya "
+            "corregido, <span> en vez de <img>) y compara "
+            "indice_marca_derogado contra el estado_vigencia YA "
+            "CORREGIDO de sus fragmentos ya almacenados. Imprime el "
+            "conteo True/False/None del ícono y los casos puntuales de "
+            "desacuerdo. Usa 'seccion' y '--limite' igual que "
+            "--solo-descubrir."
+        ),
+    )
+    parser.add_argument(
         "--solo-descubrir",
         action="store_true",
         help=(
@@ -181,6 +196,12 @@ def main() -> None:
             resultado = aplicar_correccion_vigencia(db)
             print("\n=== Corrección de vigencia aplicada (estado_vigencia/nota_vigencia) ===")
             print(json.dumps(resultado, indent=2, ensure_ascii=False))
+            return
+
+        if args.verificar_icono_vs_texto:
+            diagnostico = verificar_icono_vs_texto(db, args.seccion, limite=args.limite)
+            print("\n=== Ícono del índice vs. estado_vigencia ya corregido ===")
+            print(json.dumps(diagnostico, indent=2, ensure_ascii=False))
             return
 
         if args.limpiar_truncados:
