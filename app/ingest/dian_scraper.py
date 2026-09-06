@@ -62,6 +62,7 @@ import logging
 import pathlib
 import re
 import time
+from collections import Counter
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
@@ -175,6 +176,24 @@ DOC_LINK_RE = re.compile(
     r"/(ley|decreto|resolucion|concepto|estatuto)[\w\-]*\.html?$", re.IGNORECASE
 )
 
+# Correcciones que el propio compilador ya da para numero_articulo
+# duplicados dentro de un mismo documento — confirmadas con datos reales
+# en decreto_1625_2016.htm (Decreto Único Reglamentario), donde 5 de
+# 2147 encabezados comparten numero_articulo con otro:
+#   - Error tipográfico del decreto original: "<sic, es 1.2.7.1.8>".
+#   - Renumeración posterior: "...renumerado... Consultar artículo
+#     1.3.1.12.24>".
+# Ver _resolver_numeros_duplicados() para cómo se usan (no siempre es
+# seguro reasignar al número corregido: si ese número YA existe como
+# header propio en otra parte del documento — confirmado que pasa con
+# las renumeraciones reales, cuyo contenido válido ya vive bajo el
+# número nuevo — reasignarlo crearía una colisión nueva en vez de
+# resolver la original).
+CORRECCION_SIC_RE = re.compile(r"sic,?\s*es\s+([0-9]+(?:\.[0-9]+)*)", re.IGNORECASE)
+CORRECCION_RENUMERADO_RE = re.compile(
+    r"[Cc]onsultar\s+art[íi]culo\s+([0-9]+(?:\.[0-9]+)*)", re.IGNORECASE
+)
+
 
 @dataclass
 class DocumentoDescubierto:
@@ -237,6 +256,93 @@ def _extraer_articulos(texto_completo: str) -> list[tuple[str | None, str]]:
         numero = m.group(1).rstrip(".")
         fragmentos.append((numero, texto_completo[inicio:fin].strip()))
     return fragmentos
+
+
+def _resolver_numeros_duplicados(
+    fragmentos: list[tuple[str | None, str]],
+) -> tuple[list[tuple[str | None, str]], list[str]]:
+    """Resuelve numero_articulo duplicados dentro del mismo documento —
+    confirmado con datos reales que ocurre en documentos consolidados
+    grandes (5 de 2147 en decreto_1625_2016.htm), no por un bug de
+    ARTICULO_HEADER_RE sino por errores/renumeraciones reales del
+    decreto original, marcados por el compilador. Sin esto,
+    ingestar_documento() perdería silenciosamente el segundo artículo de
+    cada par como falso "duplicado" (mismo url_fuente).
+
+    Deja el primer artículo con cada numero_articulo tal cual. Para cada
+    ocurrencia posterior con el mismo número, en orden de prioridad:
+
+    1. Si el propio texto trae una corrección explícita del compilador
+       ("<sic, es X>" — error tipográfico, o "...renumerado...
+       Consultar artículo Y" — renumeración) Y ese número corregido NO
+       existe ya como header propio en otra parte del documento: se
+       reasigna numero_articulo a ese valor. Es el número real y
+       correcto, no un identificador inventado.
+    2. Si la corrección apunta a un número que YA existe como header
+       propio (confirmado que pasa con renumeraciones reales: el
+       contenido válido ya vive bajo el número nuevo): esta ocurrencia
+       es un stub/referencia a contenido reubicado, no un artículo
+       nuevo — se omite en vez de insertarla como duplicado vacío.
+    3. Si no hay ninguna corrección explícita en el texto (duplicado
+       genuino sin resolver por la fuente): se usa un identificador
+       sintético "{numero}-dupN" que NO corresponde a ningún ancla real
+       de la página — se documenta así en la advertencia en vez de
+       aparentar ser una URL válida.
+
+    Devuelve (fragmentos_resueltos, advertencias) — las advertencias se
+    agregan a las de ingestar_documento() para que queden visibles en el
+    resumen del scraper, no silenciadas."""
+    conteo = Counter(n for n, _ in fragmentos if n is not None)
+    numeros_usados = set(conteo)
+    vistos_por_numero: dict[str, int] = {}
+    resultado: list[tuple[str | None, str]] = []
+    advertencias: list[str] = []
+
+    for numero, texto in fragmentos:
+        if numero is None or conteo[numero] <= 1:
+            resultado.append((numero, texto))
+            continue
+
+        vistos_por_numero[numero] = vistos_por_numero.get(numero, 0) + 1
+        ocurrencia = vistos_por_numero[numero]
+        if ocurrencia == 1:
+            resultado.append((numero, texto))
+            continue
+
+        m_sic = CORRECCION_SIC_RE.search(texto[:1000])
+        m_renum = CORRECCION_RENUMERADO_RE.search(texto[:1000])
+        candidato = m_sic.group(1) if m_sic else (m_renum.group(1) if m_renum else None)
+        tipo_correccion = "<sic, es ...>" if m_sic else "renumerado, Consultar artículo ..."
+
+        if candidato and candidato not in numeros_usados:
+            advertencias.append(
+                f"numero_articulo {numero!r} duplicado (ocurrencia {ocurrencia}): "
+                f"reasignado a {candidato!r} según corrección explícita del "
+                f"documento ({tipo_correccion})."
+            )
+            resultado.append((candidato, texto))
+            numeros_usados.add(candidato)
+        elif candidato:
+            advertencias.append(
+                f"numero_articulo {numero!r} duplicado (ocurrencia {ocurrencia}): "
+                f"el documento indica que el contenido correcto está en el "
+                f"artículo {candidato!r}, que ya existe como header propio en "
+                "este documento — se omite esta ocurrencia (stub/referencia a "
+                "contenido reubicado, no un artículo nuevo)."
+            )
+            # No se agrega a `resultado`: contenido ya cubierto por `candidato`.
+        else:
+            sufijo = f"{numero}-dup{ocurrencia}"
+            advertencias.append(
+                f"numero_articulo {numero!r} duplicado (ocurrencia {ocurrencia}) "
+                f"sin corrección explícita en el texto: se usa el identificador "
+                f"sintético {sufijo!r} (NO corresponde a ningún ancla real de la "
+                "página) solo para no perder el contenido como falso duplicado."
+            )
+            resultado.append((sufijo, texto))
+            numeros_usados.add(sufijo)
+
+    return resultado, advertencias
 
 
 def _estado_y_nota_vigencia(texto_articulo: str) -> tuple[str, str | None]:
@@ -760,9 +866,13 @@ def ingestar_documento(
       todos, para que el scraper sea seguro de re-ejecutar).
     - advertencias: mensajes cuando `indice_marca_derogado` (señal del
       ícono del índice, a nivel de documento completo) no coincide con
-      el estado_vigencia inferido del texto de un artículo. Es solo una
-      verificación cruzada: nunca sobrescribe estado_vigencia, que sigue
-      viniendo del texto.
+      el estado_vigencia inferido del texto de un artículo (verificación
+      cruzada, nunca sobrescribe estado_vigencia), Y mensajes de
+      _resolver_numeros_duplicados() sobre cómo se resolvió cada
+      numero_articulo duplicado dentro de este documento (reasignado a
+      un número corregido, omitido por ser un stub reubicado, o marcado
+      con un sufijo sintético) — ver esa función para el porqué de cada
+      caso.
 
     `limite_fragmentos`, si se pasa, trunca a los primeros N fragmentos
     del documento antes de procesarlos — pensado para acotar el costo
@@ -786,11 +896,11 @@ def ingestar_documento(
     texto_completo = _texto_plano(html)
     tipo_norma = _tipo_norma_desde_url(url)
     fragmentos = _extraer_articulos(texto_completo)
+    fragmentos, advertencias = _resolver_numeros_duplicados(fragmentos)
     if limite_fragmentos is not None:
         fragmentos = fragmentos[:limite_fragmentos]
 
     insertados = 0
-    advertencias: list[str] = []
     for numero_articulo, texto in fragmentos:
         if not texto or len(texto) < 20:
             continue
