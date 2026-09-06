@@ -43,6 +43,18 @@ def diagnosticar_documento(url: str) -> None:
             f"  (¡{len(matches) - len(numeros_unicos)} encabezados comparten numero_articulo "
             "con otro — posible colapso/truncamiento!)"
         )
+        from collections import Counter
+
+        repetidos = {n: c for n, c in Counter(numeros_todos).items() if c > 1}
+        print(f"  numero_articulo repetidos ({len(repetidos)} valores distintos):")
+        for numero, veces in repetidos.items():
+            posiciones = [i for i, n in enumerate(numeros_todos) if n == numero]
+            contextos = []
+            for i in posiciones:
+                m = matches[i]
+                snippet = texto[m.end() : m.end() + 50].replace("\n", " ").strip()
+                contextos.append(f"pos {i}: {snippet!r}")
+            print(f"    {numero!r} aparece {veces} veces -> " + " | ".join(contextos))
     print("Primeros 15 números detectados (en orden, con repetidos si los hay):", numeros_todos[:15])
 
     # Señal de posible truncamiento: el número detectado termina en punto u
