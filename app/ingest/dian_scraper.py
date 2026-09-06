@@ -198,6 +198,12 @@ def _estado_y_nota_vigencia(texto_articulo: str) -> tuple[str, str | None]:
     if not m:
         return "vigente", None
     nota = m.group(0).strip("<> ")
+    # _texto_plano() usa soup.get_text("\n"), así que un número de
+    # artículo/ley referenciado dentro de la nota (que suele estar en su
+    # propio nodo HTML, ej. un <a>) queda rodeado de saltos de línea
+    # literales (ej. "artículo \n1\n de la Ley..."). Se colapsan a un
+    # solo espacio para que nota_vigencia quede legible.
+    nota = re.sub(r"\s+", " ", nota).strip()
     palabra = m.group(1).lower()
     # "Inexequible" (declarada así por la Corte Constitucional) e
     # "inconstitucional" tienen el mismo efecto práctico que "derogado"
