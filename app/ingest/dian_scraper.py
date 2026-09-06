@@ -258,19 +258,57 @@ def _extraer_articulos(texto_completo: str) -> list[tuple[str | None, str]]:
     return fragmentos
 
 
+def _parece_inicio_de_titulo(texto_fragmento: str) -> bool:
+    """True si, justo después del número de artículo que hizo matchear
+    ARTICULO_HEADER_RE, sigue algo que parece el título real de un
+    artículo (empieza con mayúscula) — confirmado en decenas de ejemplos
+    reales a lo largo de esta sesión (todos los títulos reales vistos
+    empiezan así: "HECHO GENERADOR DEL GMF.", "SERVICIOS EXCLUIDOS DEL
+    IMPUESTO SOBRE LAS VENTAS -IVA-.", "TARIFA GENERAL PARA PERSONAS
+    JURÍDICAS.", etc. — el español legal en mayúsculas nunca arranca un
+    título con minúscula).
+
+    Evidencia real del caso contrario (falso positivo de
+    ARTICULO_HEADER_RE): en estatuto_tributario.htm, numero_articulo
+    '476' aparece 2 veces — la 1a ocurrencia es una cita cruzada dentro
+    de OTRO artículo ("...conforme al artículo 476 numeral 6o, el
+    impuesto se liquidará...") que el regex matcheó como si fuera un
+    header nuevo porque _texto_plano() mete un salto de línea entre
+    "artículo" y "476" (el número referenciado vive en su propio <a>) y
+    \\s+ cruza saltos de línea sin problema; el cuerpo que le sigue
+    ("numeral 6o, el impuesto...") empieza en minúscula. La 2a ocurrencia
+    sí es el header real: "SERVICIOS EXCLUIDOS DEL IMPUESTO SOBRE LAS
+    VENTAS -IVA-.", con sus 31 numerales."""
+    m = ARTICULO_HEADER_RE.match(texto_fragmento)
+    cuerpo = texto_fragmento[m.end():].lstrip() if m else texto_fragmento.lstrip()
+    return bool(cuerpo) and cuerpo[0].isalpha() and cuerpo[0].isupper()
+
+
 def _resolver_numeros_duplicados(
     fragmentos: list[tuple[str | None, str]],
 ) -> tuple[list[tuple[str | None, str]], list[str]]:
     """Resuelve numero_articulo duplicados dentro del mismo documento —
     confirmado con datos reales que ocurre en documentos consolidados
-    grandes (5 de 2147 en decreto_1625_2016.htm), no por un bug de
-    ARTICULO_HEADER_RE sino por errores/renumeraciones reales del
-    decreto original, marcados por el compilador. Sin esto,
-    ingestar_documento() perdería silenciosamente el segundo artículo de
-    cada par como falso "duplicado" (mismo url_fuente).
+    grandes (5 de 2147 en decreto_1625_2016.htm) por errores/renumeraciones
+    reales del decreto original marcados por el compilador, Y (evidencia
+    real en estatuto_tributario.htm) por falsos positivos de
+    ARTICULO_HEADER_RE sobre citas cruzadas cuyo número referenciado cae
+    en su propia línea. Sin esto, ingestar_documento() perdería
+    silenciosamente el segundo artículo de cada par como falso
+    "duplicado" (mismo url_fuente) — o, peor, en el caso de un falso
+    positivo que aparece ANTES del header real (caso '476'), se quedaría
+    con la cita espuria y perdería el artículo real por completo.
 
-    Deja el primer artículo con cada numero_articulo tal cual. Para cada
-    ocurrencia posterior con el mismo número, en orden de prioridad:
+    Decide primero cuál ocurrencia se queda con el numero_articulo plano
+    (normalmente la 1a, salvo que la 1a NO parezca un título real de
+    artículo — ver _parece_inicio_de_titulo — y exactamente UNA ocurrencia
+    posterior sí lo parezca; en ese caso, esa posterior pasa a ser la
+    "primaria" y la 1a se resuelve como cualquier otra ocurrencia no
+    primaria). Ante cualquier ambigüedad (ninguna o más de una ocurrencia
+    parecen título real) se mantiene el comportamiento conservador
+    anterior: la 1a ocurrencia es la primaria, sin adivinar.
+
+    Para cada ocurrencia que NO sea la primaria, en orden de prioridad:
 
     1. Si el propio texto trae una corrección explícita del compilador
        ("<sic, es X>" — error tipográfico, o "...renumerado...
@@ -284,19 +322,34 @@ def _resolver_numeros_duplicados(
        es un stub/referencia a contenido reubicado, no un artículo
        nuevo — se omite en vez de insertarla como duplicado vacío.
     3. Si no hay ninguna corrección explícita en el texto (duplicado
-       genuino sin resolver por la fuente): se usa un identificador
-       sintético "{numero}-dupN" que NO corresponde a ningún ancla real
-       de la página — se documenta así en la advertencia en vez de
-       aparentar ser una URL válida.
+       genuino sin resolver por la fuente, o una cita cruzada espuria
+       sin utilidad propia): se usa un identificador sintético
+       "{numero}-dupN" que NO corresponde a ningún ancla real de la
+       página — se documenta así en la advertencia en vez de aparentar
+       ser una URL válida.
 
     Devuelve (fragmentos_resueltos, advertencias) — las advertencias se
     agregan a las de ingestar_documento() para que queden visibles en el
     resumen del scraper, no silenciadas."""
     conteo = Counter(n for n, _ in fragmentos if n is not None)
     numeros_usados = set(conteo)
+    advertencias: list[str] = []
+
+    ocurrencias_por_numero: dict[str, list[str]] = {}
+    for numero, texto in fragmentos:
+        if numero is not None and conteo[numero] > 1:
+            ocurrencias_por_numero.setdefault(numero, []).append(texto)
+
+    primaria_por_numero: dict[str, int] = {}
+    for numero, textos in ocurrencias_por_numero.items():
+        parecen_titulo = [_parece_inicio_de_titulo(t) for t in textos]
+        if not parecen_titulo[0] and sum(parecen_titulo) == 1:
+            primaria_por_numero[numero] = parecen_titulo.index(True) + 1
+        else:
+            primaria_por_numero[numero] = 1
+
     vistos_por_numero: dict[str, int] = {}
     resultado: list[tuple[str | None, str]] = []
-    advertencias: list[str] = []
 
     for numero, texto in fragmentos:
         if numero is None or conteo[numero] <= 1:
@@ -305,7 +358,17 @@ def _resolver_numeros_duplicados(
 
         vistos_por_numero[numero] = vistos_por_numero.get(numero, 0) + 1
         ocurrencia = vistos_por_numero[numero]
-        if ocurrencia == 1:
+        if ocurrencia == primaria_por_numero[numero]:
+            if ocurrencia != 1:
+                advertencias.append(
+                    f"numero_articulo {numero!r}: la ocurrencia 1 no parece un "
+                    "encabezado real de artículo (el texto que sigue al número "
+                    "no empieza en mayúscula — probable cita cruzada espuria "
+                    "capturada por ARTICULO_HEADER_RE), mientras que la "
+                    f"ocurrencia {ocurrencia} sí parece un título real — se le "
+                    "asigna el numero_articulo plano a esta última en vez de a "
+                    "la primera."
+                )
             resultado.append((numero, texto))
             continue
 
