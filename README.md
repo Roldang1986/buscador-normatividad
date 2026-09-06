@@ -14,7 +14,8 @@ app/
 ├── models.py     # modelos SQLAlchemy (tabla `norma`)
 ├── database.py   # engine + sesión, lee DATABASE_URL del entorno
 ├── schemas.py    # esquemas Pydantic
-└── ingest/       # futuros scrapers de fuentes normativas (vacío)
+└── ingest/       # scrapers de fuentes normativas
+    └── dian_scraper.py  # scraper de normograma.dian.gov.co (ver abajo)
 
 alembic/          # migraciones de base de datos
 ```
@@ -132,8 +133,28 @@ exponerse públicamente en este estado.
 }
 ```
 
+## Scraper DIAN (`app/ingest/dian_scraper.py`)
+
+Descubre e ingiere documentos de `normograma.dian.gov.co` por sección del
+índice tributario (ej. "1.1. Estatuto Tributario"), vía `scripts/
+run_dian_scraper.py` (pensado para correr como workflow de GitHub Actions,
+ver `.github/workflows/scraper-dian.yml`).
+
+**Limitación estructural conocida (no es un bug, sin fix posible del lado
+del scraper):** el ícono/marca de "derogado" del índice es una señal por
+DOCUMENTO completo, mientras que `estado_vigencia` se calcula por
+artículo individual a partir del texto. Cualquier documento con varios
+artículos propios puede tener algunos derogados por normas posteriores
+mientras el documento en sí sigue figurando vigente en el índice —
+confirmado con datos reales, no solo en el Estatuto Tributario (el caso
+extremo: 1306 artículos, 215 derogados, un solo ícono "no derogado"),
+sino también a menor escala en leyes de varios artículos (ej. Ley 2277
+de 2022: 153 fragmentos, 4 derogados). Un desacuerdo entre el ícono del
+índice y el `estado_vigencia` del texto no es automáticamente indicio de
+un bug de detección — depende de cuántos artículos propios tenga el
+documento. Ver el docstring del módulo para más detalle.
+
 ## Pendiente
 
 - Autenticación (incluyendo proteger `/ingesta/norma`)
-- Scrapers reales en `app/ingest/` (hoy la ingesta es manual, vía endpoint)
 - Conexión real a base de datos (Neon) y despliegue
