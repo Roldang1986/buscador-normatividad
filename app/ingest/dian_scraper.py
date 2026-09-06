@@ -102,18 +102,47 @@ USER_AGENT = "buscador-normatividad-bot/0.1 (+ingesta de normatividad tributaria
 REQUEST_DELAY_SECONDS = 1.0
 
 # Encabezado de artículo al inicio de línea: "ARTÍCULO 420.", "Artículo 5o.",
-# "ARTÍCULO 631-1." (numeración de artículos "adicionados", muy común en el
-# Estatuto Tributario: 631-1 a 631-6, 869-1, 108-1, etc. — el grupo
-# "(?:-[0-9]+)*" captura el/los sufijo(s) numérico(s) completos en vez de
-# cortarse en el guión, que era el bug original: [A-Za-z°ºo\-]* no incluía
-# dígitos, así que "631-1", "631-2"... "631-6" colapsaban todos en
-# numero_articulo="631-" y se descartaban como duplicados del primero).
-# No captura menciones de "artículo" a mitad de párrafo porque exige
-# inicio de línea (^) — pero el corte de líneas del HTML real puede no
-# coincidir exactamente con esta suposición; ajustar si un run produce
-# fragmentos mal cortados.
+# "ARTÍCULO 631-1." (numeración "adicionada" del Estatuto Tributario:
+# 631-1 a 631-6, 869-1, 108-1, etc.), y "ARTÍCULO 1.2.1.7.1." (numeración
+# jerárquica con puntos, confirmada con datos reales en el Decreto Único
+# Reglamentario 1625 de 2016 — decreto_1625_2016.htm, donde
+# scripts/diagnosticar_numeracion_documento.py mostró los 2147
+# encabezados reales colapsando en numero_articulo="1" antes de este
+# fix). El grupo "(?:[.-][0-9]+)*" acepta guión O punto como separador
+# entre grupos de dígitos, repetido las veces que haga falta, en vez de
+# solo guión — así "1.2.1.7.1" se captura completo en vez de cortarse en
+# el primer punto (el mismo tipo de bug silencioso que "631-" antes de
+# corregirse para guiones, con un radio de daño mucho mayor: ~2146 de
+# 2147 artículos del decreto compilado se habrían perdido).
+#
+# Sobre-captura hacia el cuerpo del texto (riesgo evaluado y descartado):
+# cada iteración de "(?:[.-][0-9]+)*" exige un punto/guión seguido
+# INMEDIATAMENTE de dígitos: en cuanto aparece un espacio, una letra o
+# cualquier otro carácter, la repetición se detiene ahí. No hay forma de
+# que el número capturado "se coma" palabras o números sueltos más
+# adelante en la misma línea (ej. cifras en UVT dentro del texto del
+# artículo) porque esos no siguen inmediatamente al número del
+# encabezado sin espacios de por medio.
+#
+# Confundir una REFERENCIA a otro artículo (ej. "el artículo 1.2.1.7.2
+# de este decreto...") con un HEADER real: el ancla ^ (inicio de línea,
+# con re.MULTILINE) ya exige que "ARTÍCULO"/"ART." sea la primera
+# palabra de la línea/nodo de texto — una referencia a mitad de párrafo
+# casi siempre está precedida por otra palabra ("el artículo...", "según
+# el artículo...") en la MISMA línea/nodo, así que no empieza la línea y
+# el ancla la descarta. Esto ya se apoyaba en el comportamiento
+# observado de _texto_plano() (soup.get_text("\n")): los encabezados
+# reales son su propio nodo de bloque, mientras que las referencias
+# quedan incrustadas en la oración que las menciona. No es una garantía
+# absoluta (depende de que el HTML real separe los nodos así en todos
+# los casos) — ver el resultado real en decreto_1625_2016.htm: el total
+# de encabezados detectados no cambia con este fix (sigue siendo 2147,
+# igual que con el regex roto), lo que confirma que el fix solo corrige
+# QUÉ se captura dentro de cada match ya existente, no CUÁNTOS matches
+# hay — si hubiera introducido falsos positivos por referencias cruzadas,
+# el conteo total habría subido por encima de 2147.
 ARTICULO_HEADER_RE = re.compile(
-    r"(?im)^\s*(?:ART[ÍI]CULO|ART\.)\s+([0-9]+(?:-[0-9]+)*[A-Za-zºo°]*)\s*\.?[\-–—]?\s*"
+    r"(?im)^\s*(?:ART[ÍI]CULO|ART\.)\s+([0-9]+(?:[.-][0-9]+)*[A-Za-zºo°]*)\s*\.?[\-–—]?\s*"
 )
 
 # Nota de vigencia real — confirmada con tres casos reales en
