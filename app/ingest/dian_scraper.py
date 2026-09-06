@@ -258,6 +258,84 @@ def _extraer_articulos(texto_completo: str) -> list[tuple[str | None, str]]:
     return fragmentos
 
 
+# --- PROTOTIPO de fragmentación por numeral (no conectado a la ingesta
+# todavía — ver scripts/prototipo_fragmentacion_numeral.py para el
+# dry-run de solo lectura sobre el artículo 879 real) ---
+#
+# Motivación real: el artículo 879 del ET (26,627 caracteres, ~31
+# numerales heterogéneos de exenciones del GMF) quedó fuera del top_k de
+# una pregunta sobre "operaciones simultáneas" pese a contener la
+# respuesta exacta en su numeral 5 — el embedding de TODO el artículo en
+# un solo vector diluye cualquier numeral específico. Ver también
+# scripts/diagnosticar_longitud_fragmentos_et.py: 424, 477, 468-1,
+# 260-11, 260-3 comparten el mismo patrón de riesgo (10,000+ caracteres).
+#
+# Numerales dentro de un artículo del ET, confirmados con el texto real
+# de 879: "12. Las operaciones..." (con punto), "19 <Numeral..." (SIN
+# punto, aparente typo editorial), "PARÁGRAFO 2o. <Parágrafo..." /
+# "PARAGRAFO. El Gravamen...". El número/palabra debe estar al inicio de
+# línea seguido de mayúscula o "<" (nunca texto en minúscula, que
+# indicaría continuación de párrafo, no un numeral nuevo) — mismo
+# principio que _parece_inicio_de_titulo().
+NUMERAL_HEADER_RE = re.compile(r"(?m)^\s*([0-9]{1,3})\.?\s+(?=[<A-ZÁÉÍÓÚÑ])")
+PARAGRAFO_HEADER_RE = re.compile(
+    r"(?mi)^\s*(PAR[ÁA]GRAFO(?:\s+[0-9]+o?)?)\.?\s*(?=[<A-ZÁÉÍÓÚÑ])"
+)
+
+# Fragmentar solo si el artículo es largo Y tiene numerales suficientes
+# para que partirlo tenga sentido natural — ver el análisis de por qué
+# es un AND y no un OR en la propuesta de diseño (un artículo largo sin
+# numerales no tiene por dónde partirse; uno con muchos numerales pero
+# corto no sufre el problema de dilución que esto resuelve). Umbrales
+# provisionales a validar con el dry-run sobre 879 (26,627 caracteres,
+# ~31 numerales) antes de aplicar a otros artículos.
+UMBRAL_LONGITUD_FRAGMENTACION_NUMERAL = 8000
+UMBRAL_NUMERALES_FRAGMENTACION = 10
+
+
+def _detectar_numerales(texto_articulo: str) -> list[re.Match]:
+    """Devuelve los matches de NUMERAL_HEADER_RE y PARAGRAFO_HEADER_RE
+    dentro de un artículo, ordenados por posición."""
+    matches = list(NUMERAL_HEADER_RE.finditer(texto_articulo)) + list(
+        PARAGRAFO_HEADER_RE.finditer(texto_articulo)
+    )
+    return sorted(matches, key=lambda m: m.start())
+
+
+def _debe_fragmentarse_por_numeral(texto_articulo: str) -> bool:
+    return (
+        len(texto_articulo) > UMBRAL_LONGITUD_FRAGMENTACION_NUMERAL
+        and len(_detectar_numerales(texto_articulo)) >= UMBRAL_NUMERALES_FRAGMENTACION
+    )
+
+
+def _fragmentar_articulo_por_numeral(texto_articulo: str) -> list[tuple[str | None, str]]:
+    """Si texto_articulo cumple _debe_fragmentarse_por_numeral, lo divide
+    en (etiqueta_numeral, texto_del_numeral) — cada fragmento lleva el
+    preámbulo del artículo (título + cualquier texto antes del primer
+    numeral) prefijado, para que conserve contexto temático propio y no
+    dependa de que el agente vea también el artículo completo.
+
+    Si NO cumple el criterio, devuelve [(None, texto_articulo)] sin
+    cambios — misma forma de retorno en ambos casos para uso uniforme
+    por el llamador (ver _extraer_articulos, incluso formato)."""
+    if not _debe_fragmentarse_por_numeral(texto_articulo):
+        return [(None, texto_articulo)]
+
+    matches = _detectar_numerales(texto_articulo)
+    preambulo = texto_articulo[: matches[0].start()].strip()
+
+    fragmentos: list[tuple[str | None, str]] = []
+    for i, m in enumerate(matches):
+        inicio = m.start()
+        fin = matches[i + 1].start() if i + 1 < len(matches) else len(texto_articulo)
+        etiqueta = m.group(1).strip()
+        cuerpo_numeral = texto_articulo[inicio:fin].strip()
+        texto_fragmento = f"{preambulo}\n\n{cuerpo_numeral}" if preambulo else cuerpo_numeral
+        fragmentos.append((etiqueta, texto_fragmento))
+    return fragmentos
+
+
 # Firma real (evidencia: estatuto_tributario.htm) de un anexo de "valores
 # absolutos reexpresados en UVT" al final del ET, que produce MUCHOS
 # falsos positivos de ARTICULO_HEADER_RE (numero_articulo '476', '499',

@@ -44,6 +44,14 @@ on:
         description: "MODO DE ESCRITURA: borra las filas identificadas por diagnosticar_colisiones_url sobre esta URL y reingiere el documento para reinsertar el contenido correcto. Correr diagnosticar_colisiones_url primero — no se puede combinar con él en la misma corrida."
         required: false
         default: ""
+      prototipo_fragmentacion_url:
+        description: "Si se pasa (junto con prototipo_fragmentacion_articulo), corre el prototipo de solo reporte de fragmentación por numeral sobre este documento. No toca la BD ni escribe nada."
+        required: false
+        default: ""
+      prototipo_fragmentacion_articulo:
+        description: "numero_articulo a probar con prototipo_fragmentacion_url (ej. 879)"
+        required: false
+        default: ""
 
 jobs:
   diagnostico:
@@ -65,7 +73,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -126,3 +134,11 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.corregir_colisiones_url }}
         run: python scripts/aplicar_correccion_colisiones_headers.py "$URL_DOCUMENTO"
+
+      - name: Prototipo de fragmentación por numeral (solo reporte, sin BD)
+        if: ${{ github.event.inputs.prototipo_fragmentacion_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.prototipo_fragmentacion_url }}
+          NUMERO_ARTICULO: ${{ github.event.inputs.prototipo_fragmentacion_articulo }}
+        run: python scripts/prototipo_fragmentacion_numeral.py "$URL_DOCUMENTO" "$NUMERO_ARTICULO"
