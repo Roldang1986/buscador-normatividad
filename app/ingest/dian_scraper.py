@@ -292,6 +292,23 @@ PARAGRAFO_HEADER_RE = re.compile(
 UMBRAL_LONGITUD_FRAGMENTACION_NUMERAL = 8000
 UMBRAL_NUMERALES_FRAGMENTACION = 10
 
+# Allowlist manual de artículos donde ingestar_documento() aplica de
+# verdad la fragmentación por numeral — deliberadamente NO es "todo
+# artículo que califique por umbral". De los 6 artículos de alto riesgo
+# analizados (879, 424, 477, 468-1, 260-11, 260-3), solo 879 y 477
+# resultaron casos limpios en el dry-run de scripts/prototipo_fragmentacion_numeral.py:
+# - 424: sus numerales son en sí mismos listas arancelarias enormes — la
+#   fragmentación no resuelve su dilución (fragmentos igual de grandes).
+# - 260-11: tiene DOS listas numeradas independientes bajo literales
+#   "A."/"B." (etiquetas de numeral repetidas) — pendiente desambiguador
+#   de namespace por literal (ver LITERAL_HEADER_RE, no implementado
+#   todavía).
+# - 468-1: parágrafos duplicados sin numerar de forma distinguible.
+# - 260-3: no calificó para fragmentar (no cumple ambos umbrales).
+# Agregar un artículo aquí solo tras confirmar con ese mismo dry-run que
+# no tiene ninguno de estos problemas.
+ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {"879", "477"}
+
 
 def _detectar_numerales(texto_articulo: str) -> list[re.Match]:
     """Devuelve los matches de NUMERAL_HEADER_RE y PARAGRAFO_HEADER_RE
@@ -1215,6 +1232,83 @@ def aplicar_correccion_colisiones_headers(db: Session, url_documento: str) -> di
     }
 
 
+def verificar_fragmentacion_numeral(db: Session, url_documento: str, articulos: list[str]) -> dict:
+    """Diagnóstico de solo lectura (no escribe nada): para cada
+    numero_articulo en `articulos` (se espera que ya estén en
+    ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA), compara la fila
+    ÚNICA actual en BD (url_fuente=url#numero, el artículo completo sin
+    fragmentar) contra los fragmentos por numeral que produciría
+    reingerir con la fragmentación habilitada. Pensado para correr ANTES
+    de aplicar_fragmentacion_numeral, nunca junto con ella."""
+    url_base = url_documento.split("#")[0]
+    html = descargar_html(url_base)
+    texto = _texto_plano(html)
+    fragmentos = _extraer_articulos(texto)
+    fragmentos, _ = _resolver_numeros_duplicados(fragmentos)
+    texto_por_numero = dict(fragmentos)
+
+    casos = []
+    for numero in articulos:
+        url_fuente = f"{url_base}#{numero}"
+        fila_actual = db.query(Norma).filter(Norma.url_fuente == url_fuente).first()
+        texto_articulo = texto_por_numero.get(numero)
+        if texto_articulo is None:
+            casos.append({"numero_articulo": numero, "error": "no encontrado en el documento real"})
+            continue
+        califica = _debe_fragmentarse_por_numeral(texto_articulo)
+        nuevos_fragmentos = _fragmentar_articulo_por_numeral(texto_articulo)
+        casos.append(
+            {
+                "numero_articulo": numero,
+                "url_fuente_actual": url_fuente,
+                "fila_actual_existe_en_bd": fila_actual is not None,
+                "id_fila_actual": fila_actual.id if fila_actual else None,
+                "longitud_fila_actual": len(fila_actual.texto) if fila_actual else None,
+                "califica_para_fragmentar": califica,
+                "fragmentos_nuevos": len(nuevos_fragmentos) if califica else 1,
+                "etiquetas_nuevas": [e for e, _ in nuevos_fragmentos] if califica else [None],
+            }
+        )
+
+    return {"url_documento": url_base, "casos": casos}
+
+
+def aplicar_fragmentacion_numeral(db: Session, url_documento: str, articulos: list[str]) -> dict:
+    """MODO DE ESCRITURA: borra la fila ÚNICA actual (url_fuente=url#numero)
+    de cada numero_articulo en `articulos`, y vuelve a llamar a
+    ingestar_documento() sobre el mismo documento — que, con
+    ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA ya incluyendo esos
+    números, reinsertará cada uno como varias filas (una por numeral) en
+    vez de una sola. ingestar_documento() es idempotente por url_fuente,
+    así que no reinserta ni modifica ningún otro artículo que ya exista.
+
+    Requiere que la columna `numeral` ya exista en la BD (alembic upgrade
+    head con la migración 0002 aplicada) — de lo contrario la inserción
+    fallará.
+
+    Nunca se corre en la misma invocación que verificar_fragmentacion_numeral."""
+    url_base = url_documento.split("#")[0]
+
+    filas_borradas = []
+    for numero in articulos:
+        url_fuente = f"{url_base}#{numero}"
+        fila = db.query(Norma).filter(Norma.url_fuente == url_fuente).first()
+        if fila is not None:
+            filas_borradas.append({"id": fila.id, "numero_articulo": numero, "url_fuente": url_fuente})
+            db.delete(fila)
+    db.commit()
+
+    insertados, advertencias_ingesta = ingestar_documento(db, url_base)
+
+    return {
+        "url_documento": url_base,
+        "filas_borradas": filas_borradas,
+        "total_filas_borradas": len(filas_borradas),
+        "fragmentos_insertados_tras_reingesta": insertados,
+        "advertencias_reingesta": advertencias_ingesta,
+    }
+
+
 # Umbral de "pocos artículos" para la asimetría de confiabilidad
 # índice-vs-texto documentada abajo. Elegido para separar claramente
 # decretos modificatorios cortos (evidencia real: decreto_0165_2024.htm,
@@ -1313,62 +1407,81 @@ def ingestar_documento(
         [n for n, _ in fragmentos], len(fragmentos)
     )
 
+    url_base = url.split("#")[0]
     insertados = 0
-    for numero_articulo, texto in fragmentos:
-        if not texto or len(texto) < 20:
+    for numero_articulo, texto_articulo in fragmentos:
+        if not texto_articulo or len(texto_articulo) < 20:
             continue
 
-        url_base = url.split("#")[0]
-        url_fuente = f"{url_base}#{numero_articulo}" if numero_articulo else url_base
-        if _norma_existe(db, url_fuente):
-            logger.info("Ya existe, se omite: %s", url_fuente)
-            continue
+        # Fragmentación por numeral (ver ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA):
+        # solo para el puñado de artículos ya confirmados como casos
+        # limpios se reemplaza la fila única por varias (una por
+        # numeral/parágrafo) — el resto del ET sigue insertándose como
+        # una sola fila por numero_articulo, igual que siempre.
+        if (
+            numero_articulo in ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA
+            and _debe_fragmentarse_por_numeral(texto_articulo)
+        ):
+            sub_fragmentos = _fragmentar_articulo_por_numeral(texto_articulo)
+        else:
+            sub_fragmentos = [(None, texto_articulo)]
 
-        estado_vigencia, nota_vigencia = _estado_y_nota_vigencia(texto)
-        fuente = _fuente_desde_url(url, tipo_norma, numero_articulo)
+        for numeral, texto in sub_fragmentos:
+            url_fuente = f"{url_base}#{numero_articulo}" if numero_articulo else url_base
+            if numeral:
+                url_fuente = f"{url_fuente}#{numeral}"
+            if _norma_existe(db, url_fuente):
+                logger.info("Ya existe, se omite: %s", url_fuente)
+                continue
 
-        if indice_marca_derogado is not None:
-            texto_dice_derogado = estado_vigencia == "derogado"
-            if indice_marca_derogado and documento_simple and not texto_dice_derogado:
-                estado_vigencia = "derogado"
-                nota_vigencia = nota_vigencia or (
-                    "Documento marcado como derogado en el índice de "
-                    "normograma (ícono de vigencia); el texto de este "
-                    "artículo no traía nota de vigencia propia — se usa "
-                    "el índice como fuente de verdad por tratarse de un "
-                    "documento corto/atómico (ver asimetría documentada "
-                    "en ingestar_documento)."
-                )
-                advertencias.append(
-                    f"{url_fuente}: estado_vigencia corregido a 'derogado' "
-                    "según el ícono del índice (documento corto/atómico "
-                    "sin numeración jerárquica profunda) — el texto no "
-                    "traía nota de vigencia propia."
-                )
-            elif texto_dice_derogado != indice_marca_derogado:
-                advertencias.append(
-                    f"{url_fuente}: el índice marca "
-                    f"{'derogado' if indice_marca_derogado else 'no derogado'} "
-                    f"pero el texto sugiere estado_vigencia={estado_vigencia!r} "
-                    "— revisar manualmente."
-                )
+            estado_vigencia, nota_vigencia = _estado_y_nota_vigencia(texto)
+            fuente = _fuente_desde_url(url, tipo_norma, numero_articulo)
+            if numeral:
+                fuente = f"{fuente}, numeral {numeral}"
 
-        embedding = embed_document(texto)
+            if indice_marca_derogado is not None:
+                texto_dice_derogado = estado_vigencia == "derogado"
+                if indice_marca_derogado and documento_simple and not texto_dice_derogado:
+                    estado_vigencia = "derogado"
+                    nota_vigencia = nota_vigencia or (
+                        "Documento marcado como derogado en el índice de "
+                        "normograma (ícono de vigencia); el texto de este "
+                        "artículo no traía nota de vigencia propia — se usa "
+                        "el índice como fuente de verdad por tratarse de un "
+                        "documento corto/atómico (ver asimetría documentada "
+                        "en ingestar_documento)."
+                    )
+                    advertencias.append(
+                        f"{url_fuente}: estado_vigencia corregido a 'derogado' "
+                        "según el ícono del índice (documento corto/atómico "
+                        "sin numeración jerárquica profunda) — el texto no "
+                        "traía nota de vigencia propia."
+                    )
+                elif texto_dice_derogado != indice_marca_derogado:
+                    advertencias.append(
+                        f"{url_fuente}: el índice marca "
+                        f"{'derogado' if indice_marca_derogado else 'no derogado'} "
+                        f"pero el texto sugiere estado_vigencia={estado_vigencia!r} "
+                        "— revisar manualmente."
+                    )
 
-        norma = Norma(
-            tipo_norma=tipo_norma,
-            numero_articulo=numero_articulo,
-            fuente=fuente,
-            url_fuente=url_fuente,
-            texto=texto,
-            estado_vigencia=estado_vigencia,
-            nota_vigencia=nota_vigencia,
-            embedding=embedding,
-        )
-        db.add(norma)
-        db.commit()
-        insertados += 1
-        time.sleep(REQUEST_DELAY_SECONDS)
+            embedding = embed_document(texto)
+
+            norma = Norma(
+                tipo_norma=tipo_norma,
+                numero_articulo=numero_articulo,
+                numeral=numeral,
+                fuente=fuente,
+                url_fuente=url_fuente,
+                texto=texto,
+                estado_vigencia=estado_vigencia,
+                nota_vigencia=nota_vigencia,
+                embedding=embedding,
+            )
+            db.add(norma)
+            db.commit()
+            insertados += 1
+            time.sleep(REQUEST_DELAY_SECONDS)
 
     return insertados, advertencias
 

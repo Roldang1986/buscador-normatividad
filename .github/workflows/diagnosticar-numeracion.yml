@@ -64,6 +64,27 @@ on:
         description: "etiqueta de numeral cuyo fragmento completo se debe imprimir (ej. 2)"
         required: false
         default: ""
+      ejecutar_migracion_alembic:
+        description: "Si es 'true', corre 'alembic upgrade head' (aplica la migración 0002: columna numeral en norma) y muestra la revisión actual. No toca ninguna fila de datos."
+        required: false
+        type: boolean
+        default: false
+      verificar_fragmentacion_url:
+        description: "Si se pasa (junto con verificar_fragmentacion_articulos), corre verificar_fragmentacion_numeral.py: solo lectura, compara la fila única actual de cada artículo contra los fragmentos por numeral que produciría la fragmentación. No toca la BD."
+        required: false
+        default: ""
+      verificar_fragmentacion_articulos:
+        description: "numero_articulo(s) a verificar con verificar_fragmentacion_url, separados por espacio (ej. '879 477')"
+        required: false
+        default: ""
+      aplicar_fragmentacion_url:
+        description: "MODO DE ESCRITURA: borra la fila única actual de cada numero_articulo en aplicar_fragmentacion_articulos sobre esta URL y reingiere el documento (ahora fragmentado por numeral para esos artículos). Correr verificar_fragmentacion_url primero y ejecutar_migracion_alembic antes que esto — no se puede combinar con el diagnóstico en la misma corrida."
+        required: false
+        default: ""
+      aplicar_fragmentacion_articulos:
+        description: "numero_articulo(s) a fragmentar con aplicar_fragmentacion_url, separados por espacio (ej. '879 477')"
+        required: false
+        default: ""
 
 jobs:
   diagnostico:
@@ -85,7 +106,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -163,3 +184,26 @@ jobs:
           NUMERO_ARTICULO: ${{ github.event.inputs.investigar_numeral_articulo }}
           ETIQUETA: ${{ github.event.inputs.investigar_numeral_etiqueta }}
         run: python scripts/investigar_numeral_faltante.py "$URL_DOCUMENTO" "$NUMERO_ARTICULO" "$ETIQUETA"
+
+      - name: Ejecutar migración de Alembic (agrega columna numeral)
+        if: ${{ github.event.inputs.ejecutar_migracion_alembic == 'true' }}
+        run: |
+          alembic upgrade head
+          echo "--- Revisión actual ---"
+          alembic current
+
+      - name: Verificar fragmentación por numeral (solo lectura, con BD)
+        if: ${{ github.event.inputs.verificar_fragmentacion_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.verificar_fragmentacion_url }}
+          ARTICULOS: ${{ github.event.inputs.verificar_fragmentacion_articulos }}
+        run: python scripts/verificar_fragmentacion_numeral.py "$URL_DOCUMENTO" $ARTICULOS
+
+      - name: Aplicar fragmentación por numeral (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.aplicar_fragmentacion_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.aplicar_fragmentacion_url }}
+          ARTICULOS: ${{ github.event.inputs.aplicar_fragmentacion_articulos }}
+        run: python scripts/aplicar_fragmentacion_numeral.py "$URL_DOCUMENTO" $ARTICULOS
