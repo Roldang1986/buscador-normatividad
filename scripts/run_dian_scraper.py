@@ -12,6 +12,7 @@ import pathlib
 
 from app.database import SessionLocal
 from app.ingest.dian_scraper import (
+    aplicar_correccion_vigencia,
     contar_marca_derogado,
     descubrir_urls_seccion,
     limpiar_numeros_articulo_truncados,
@@ -95,6 +96,19 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--corregir-vigencia",
+        action="store_true",
+        help=(
+            "MODO DE ESCRITURA: aplica en la BD la corrección de "
+            "estado_vigencia/nota_vigencia calculada por "
+            "verificar_vigencia_texto_almacenado(). Solo toca esas dos "
+            "columnas (nunca url_fuente, texto ni embedding). Correr "
+            "--solo-verificar-vigencia primero y revisar la muestra antes "
+            "de usar este flag — deliberadamente no se puede combinar con "
+            "--solo-verificar-vigencia en la misma corrida."
+        ),
+    )
+    parser.add_argument(
         "--solo-descubrir",
         action="store_true",
         help=(
@@ -108,14 +122,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.solo_verificar_vigencia and args.corregir_vigencia:
+        parser.error(
+            "--solo-verificar-vigencia y --corregir-vigencia no se pueden "
+            "combinar: corré primero el modo de solo lectura, revisá la "
+            "muestra, y solo después corré --corregir-vigencia por separado."
+        )
+
     if (
         not args.solo_verificar_numeracion
         and not args.solo_verificar_vigencia
+        and not args.corregir_vigencia
         and not args.seccion
     ):
         parser.error(
-            "'seccion' es obligatorio salvo con --solo-verificar-numeracion "
-            "o --solo-verificar-vigencia"
+            "'seccion' es obligatorio salvo con --solo-verificar-numeracion, "
+            "--solo-verificar-vigencia o --corregir-vigencia"
         )
 
     if args.capturas_dir:
@@ -153,6 +175,12 @@ def main() -> None:
             diagnostico = verificar_vigencia_texto_almacenado(db)
             print("\n=== Diagnóstico de vigencia sobre texto ya almacenado ===")
             print(json.dumps(diagnostico, indent=2, ensure_ascii=False))
+            return
+
+        if args.corregir_vigencia:
+            resultado = aplicar_correccion_vigencia(db)
+            print("\n=== Corrección de vigencia aplicada (estado_vigencia/nota_vigencia) ===")
+            print(json.dumps(resultado, indent=2, ensure_ascii=False))
             return
 
         if args.limpiar_truncados:

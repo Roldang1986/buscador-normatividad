@@ -30,6 +30,11 @@ on:
         required: false
         type: boolean
         default: false
+      corregir_vigencia:
+        description: "MODO DE ESCRITURA: aplica en la BD la corrección de estado_vigencia/nota_vigencia (solo esas dos columnas). Correr solo_verificar_vigencia primero y revisar la muestra — no se puede combinar con solo_verificar_vigencia en la misma corrida."
+        required: false
+        type: boolean
+        default: false
       solo_descubrir:
         description: "No descarga ni inserta nada en la BD: solo corre el descubrimiento en el índice e imprime los documentos encontrados + conteo de indice_marca_derogado. Combinar con capturas para inspeccionar el HTML del DOM."
         required: false
@@ -73,6 +78,7 @@ jobs:
           LIMPIAR_TRUNCADOS: ${{ github.event.inputs.limpiar_truncados }}
           SOLO_VERIFICAR: ${{ github.event.inputs.solo_verificar_numeracion }}
           SOLO_VERIFICAR_VIGENCIA: ${{ github.event.inputs.solo_verificar_vigencia }}
+          CORREGIR_VIGENCIA: ${{ github.event.inputs.corregir_vigencia }}
           SOLO_DESCUBRIR: ${{ github.event.inputs.solo_descubrir }}
         run: |
           ARGS=(scripts/run_dian_scraper.py "$SECCION" --limite "$LIMITE" --capturas-dir scraper-debug)
@@ -87,6 +93,9 @@ jobs:
           fi
           if [ "$SOLO_VERIFICAR_VIGENCIA" = "true" ]; then
             ARGS+=(--solo-verificar-vigencia)
+          fi
+          if [ "$CORREGIR_VIGENCIA" = "true" ]; then
+            ARGS+=(--corregir-vigencia)
           fi
           if [ "$SOLO_DESCUBRIR" = "true" ]; then
             ARGS+=(--solo-descubrir)
