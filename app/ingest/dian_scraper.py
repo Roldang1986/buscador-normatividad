@@ -37,6 +37,23 @@ Confirmado con acceso real al sitio (no heurístico):
   otras normas por nombre de archivo (ej. ley_2068_2020.htm,
   decreto_1742_2020.htm) y anclas a artículos específicos
   (ej. estatuto_tributario.htm#420).
+
+LIMITACIÓN ESTRUCTURAL DE LA FUENTE (no es un bug, no tiene fix posible
+del lado del scraper): indice_marca_derogado es una señal por DOCUMENTO
+completo (una fila del índice tiene un solo ícono/span de estado), pero
+cualquier documento con múltiples artículos propios puede tener algunos
+de esos artículos derogados/modificados por normas posteriores mientras
+el documento en sí (la ley/decreto tal como fue promulgado) sigue
+figurando vigente en el índice. Confirmado con datos reales via
+verificar_icono_vs_texto(), no solo con el Estatuto Tributario (que es
+el caso extremo: 1306 artículos, 215 derogados, bajo un solo ícono
+"no derogado"): el mismo patrón aparece a menor escala en leyes de
+varios artículos que NO son el Estatuto Tributario, ej. Ley 2277 de
+2022 (153 fragmentos en BD, 4 derogados) o Decreto 772 de 2020 (17
+fragmentos, 3 derogados). Antes de tratar un desacuerdo
+índice-vs-texto como señal de un bug, revisar cuántos artículos propios
+tiene el documento — cuantos más tenga, más esperable es el desacuerdo
+por diseño de la fuente, no por un error de detección.
 """
 
 from __future__ import annotations
