@@ -1,0 +1,31 @@
+name: Diagnóstico de numeración de artículos (documento real)
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "URL(s) de documento(s) a diagnosticar, separadas por espacio"
+        required: true
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    env:
+      # app.database exige DATABASE_URL al importarse (RuntimeError si
+      # falta), aunque este diagnóstico no ejecute ninguna consulta.
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Diagnóstico de numeración (solo lectura, sin BD)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URLS: ${{ github.event.inputs.urls }}
+        run: python scripts/diagnosticar_numeracion_documento.py $URLS
