@@ -116,6 +116,21 @@ def diagnosticar_documento(url: str) -> None:
 
         numeros_corregidos = sorted(set(candidatos_correccion.values()))
         inspeccionar_anclas_reales(html, list(repetidos.keys()) + numeros_corregidos)
+
+        # Crítico: si el número "corregido" YA existe como un header propio
+        # (ARTICULO_HEADER_RE) en otra parte del documento, reasignárselo al
+        # duplicado no resuelve nada — solo mueve la colisión a otro par.
+        print("\n=== ¿Los números corregidos ya existen como header propio en otra parte? ===")
+        for numero_corregido in numeros_corregidos:
+            ya_existe_como_header = numero_corregido in numeros_unicos
+            print(
+                f"  {numero_corregido!r}: "
+                + (
+                    "SÍ ya existe como header propio -> reasignarlo CREARÍA una nueva colisión"
+                    if ya_existe_como_header
+                    else "NO existe como header propio -> reasignarlo es seguro, no colisiona"
+                )
+            )
     print("Primeros 15 números detectados (en orden, con repetidos si los hay):", numeros_todos[:15])
 
     # Señal de posible truncamiento: el número detectado termina en punto u
