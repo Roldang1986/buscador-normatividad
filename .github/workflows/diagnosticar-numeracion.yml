@@ -23,6 +23,19 @@ on:
         description: "numero_articulo a verificar si está entre los candidatos de inspeccionar_busqueda_pregunta (opcional); si no está, muestra su texto completo almacenado"
         required: false
         default: ""
+      diagnosticar_longitud_et:
+        description: "Si es 'true', mide la longitud de todos los fragmentos del ET ya almacenados (riesgo de dilución del embedding, mismo patrón que el artículo 879)"
+        required: false
+        type: boolean
+        default: false
+      diagnosticar_longitud_umbral:
+        description: "Umbral de caracteres para diagnosticar_longitud_et (opcional, default 26627 = longitud del art. 879)"
+        required: false
+        default: ""
+      diagnosticar_longitud_numero_articulo:
+        description: "numero_articulo puntual a reportar junto con diagnosticar_longitud_et (opcional, ej. 476)"
+        required: false
+        default: ""
 
 jobs:
   diagnostico:
@@ -44,7 +57,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -71,6 +84,22 @@ jobs:
           NUMERO_ARTICULO: ${{ github.event.inputs.inspeccionar_busqueda_numero_articulo }}
         run: |
           ARGS=(scripts/inspeccionar_busqueda_semantica.py "$PREGUNTA")
+          if [ -n "$NUMERO_ARTICULO" ]; then
+            ARGS+=(--numero-articulo "$NUMERO_ARTICULO")
+          fi
+          python "${ARGS[@]}"
+
+      - name: Diagnosticar longitud de fragmentos del ET (solo lectura, con BD)
+        if: ${{ github.event.inputs.diagnosticar_longitud_et == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          UMBRAL: ${{ github.event.inputs.diagnosticar_longitud_umbral }}
+          NUMERO_ARTICULO: ${{ github.event.inputs.diagnosticar_longitud_numero_articulo }}
+        run: |
+          ARGS=(scripts/diagnosticar_longitud_fragmentos_et.py --top 10)
+          if [ -n "$UMBRAL" ]; then
+            ARGS+=(--umbral "$UMBRAL")
+          fi
           if [ -n "$NUMERO_ARTICULO" ]; then
             ARGS+=(--numero-articulo "$NUMERO_ARTICULO")
           fi
