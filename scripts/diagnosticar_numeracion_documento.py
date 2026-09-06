@@ -17,6 +17,7 @@ Uso:
 """
 
 import json
+import re
 import sys
 
 from app.ingest.dian_scraper import (
@@ -26,6 +27,39 @@ from app.ingest.dian_scraper import (
     _texto_plano,
     descargar_html,
 )
+
+# Busca anclas HTML reales (<a name="...">, <a id="...">, o id="..." en
+# cualquier otra etiqueta) para verificar si url_fuente="{url}#{numero}"
+# corresponde a un ancla real navegable en la página, o si es un
+# identificador puramente sintético inventado por este scraper para
+# unicidad interna (_norma_existe filtra por url_fuente, no por navegar
+# realmente a esa ancla).
+ANCLA_RE = re.compile(r'<a[^>]+(?:name|id)\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+def inspeccionar_anclas_reales(html: str, numeros_de_interes: list[str]) -> None:
+    anclas = ANCLA_RE.findall(html)
+    print(f"\n=== Anclas HTML reales (<a name=/id=>) en el documento ===")
+    print(f"Total de anclas encontradas: {len(anclas)}")
+    if not anclas:
+        print(
+            "  No hay NINGUNA ancla name=/id= en el HTML crudo. Esto confirma que "
+            "'#numero_articulo' en url_fuente NO es un ancla real navegable de la "
+            "página — es un identificador sintético que este scraper inventa "
+            "únicamente para tener una url_fuente única por artículo dentro del "
+            "mismo documento. Un sufijo '-2' tiene exactamente el mismo estatus "
+            "(sintético) que el propio '#numero_articulo' sin sufijo: ninguno de "
+            "los dos lleva a ningún lado en un navegador real, pero ambos sirven "
+            "igual de bien como clave de unicidad interna."
+        )
+        return
+    print("Primeras 15 anclas encontradas (valor):", anclas[:15])
+    for numero in numeros_de_interes:
+        coincidencias = [a for a in anclas if a == numero]
+        if coincidencias:
+            print(f"  Ancla exacta para {numero!r}: SÍ existe ({len(coincidencias)} vez/veces)")
+        else:
+            print(f"  Ancla exacta para {numero!r}: NO existe ninguna coincidencia literal")
 
 
 def diagnosticar_documento(url: str) -> None:
@@ -46,15 +80,17 @@ def diagnosticar_documento(url: str) -> None:
         from collections import Counter
 
         repetidos = {n: c for n, c in Counter(numeros_todos).items() if c > 1}
-        print(f"  numero_articulo repetidos ({len(repetidos)} valores distintos):")
+        print(f"  numero_articulo repetidos ({len(repetidos)} valores distintos) — texto completo de cada caso:")
         for numero, veces in repetidos.items():
             posiciones = [i for i, n in enumerate(numeros_todos) if n == numero]
-            contextos = []
+            print(f"\n  --- {numero!r} aparece {veces} veces ---")
             for i in posiciones:
                 m = matches[i]
-                snippet = texto[m.end() : m.end() + 50].replace("\n", " ").strip()
-                contextos.append(f"pos {i}: {snippet!r}")
-            print(f"    {numero!r} aparece {veces} veces -> " + " | ".join(contextos))
+                fin = matches[i + 1].start() if i + 1 < len(matches) else len(texto)
+                fragmento_completo = texto[m.end() : fin].strip()
+                print(f"    pos {i}: {fragmento_completo[:400]!r}")
+
+        inspeccionar_anclas_reales(html, list(repetidos.keys()))
     print("Primeros 15 números detectados (en orden, con repetidos si los hay):", numeros_todos[:15])
 
     # Señal de posible truncamiento: el número detectado termina en punto u
