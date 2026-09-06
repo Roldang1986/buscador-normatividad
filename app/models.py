@@ -24,6 +24,13 @@ class Norma(Base):
 
     numero_articulo: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+    # Distingue el numeral/parágrafo dentro de un artículo fragmentado
+    # (ver app/ingest/dian_scraper.py: _fragmentar_articulo_por_numeral) —
+    # numero_articulo se mantiene igual entre todas las filas del mismo
+    # artículo fragmentado (ej. "879"), numeral las diferencia (ej. "6",
+    # "PARÁGRAFO 2o"). NULL para artículos no fragmentados (la mayoría).
+    numeral: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # Ej. "Estatuto Tributario art. 420"
     fuente: Mapped[str] = mapped_column(Text, nullable=False)
 
