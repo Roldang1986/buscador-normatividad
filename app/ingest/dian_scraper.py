@@ -573,12 +573,18 @@ def verificar_vigencia_texto_almacenado(db: Session) -> dict:
     vigentes = db.query(Norma).filter(Norma.estado_vigencia == "vigente").all()
 
     deberian_cambiar = []
+    resumen_por_estado_nuevo = {"a_modificado": 0, "a_derogado": 0}
     for n in vigentes:
         estado_recalculado, nota_recalculada = _estado_y_nota_vigencia(n.texto[:400])
         if estado_recalculado != "vigente":
+            resumen_por_estado_nuevo[
+                "a_derogado" if estado_recalculado == "derogado" else "a_modificado"
+            ] += 1
             deberian_cambiar.append(
                 {
                     "id": n.id,
+                    "numero_articulo": n.numero_articulo,
+                    "fuente": n.fuente,
                     "url_fuente": n.url_fuente,
                     "estado_actual": n.estado_vigencia,
                     "estado_recalculado": estado_recalculado,
@@ -590,7 +596,42 @@ def verificar_vigencia_texto_almacenado(db: Session) -> dict:
         "total_normas_en_bd": db.query(Norma).count(),
         "total_normas_estado_vigente_en_bd": len(vigentes),
         "deberian_cambiar_de_estado": len(deberian_cambiar),
-        "detalle_primeras_50": deberian_cambiar[:50],
+        "resumen_por_estado_nuevo": resumen_por_estado_nuevo,
+        "muestra_primeras_10": deberian_cambiar[:10],
+    }
+
+
+def aplicar_correccion_vigencia(db: Session) -> dict:
+    """Corrige EN EL LUGAR estado_vigencia y nota_vigencia de las normas
+    marcadas "vigente" cuyo `texto` ya almacenado, reevaluado con el
+    VIGENCIA_RE corregido, indica otro estado. Solo escribe esas dos
+    columnas — nunca toca url_fuente, texto ni embedding, y nunca
+    descarga ni scrapea nada (usa el texto ya guardado, igual que
+    verificar_vigencia_texto_almacenado).
+
+    Deliberadamente separada de verificar_vigencia_texto_almacenado (que
+    es de solo lectura): la aprobación de la muestra que devuelve esa
+    función es responsabilidad de quien invoca esta, no hay
+    confirmación automática aquí."""
+    vigentes = db.query(Norma).filter(Norma.estado_vigencia == "vigente").all()
+
+    actualizadas = 0
+    resumen_por_estado_nuevo = {"a_modificado": 0, "a_derogado": 0}
+    for n in vigentes:
+        estado_recalculado, nota_recalculada = _estado_y_nota_vigencia(n.texto[:400])
+        if estado_recalculado != "vigente":
+            n.estado_vigencia = estado_recalculado
+            n.nota_vigencia = nota_recalculada
+            actualizadas += 1
+            resumen_por_estado_nuevo[
+                "a_derogado" if estado_recalculado == "derogado" else "a_modificado"
+            ] += 1
+    db.commit()
+
+    return {
+        "normas_revisadas": len(vigentes),
+        "normas_actualizadas": actualizadas,
+        "resumen_por_estado_nuevo": resumen_por_estado_nuevo,
     }
 
 
