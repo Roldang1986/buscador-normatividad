@@ -641,6 +641,67 @@ def aplicar_correccion_vigencia(db: Session) -> dict:
     }
 
 
+def verificar_icono_vs_texto(db: Session, seccion_titulo: str, limite: int | None = None) -> dict:
+    """Diagnóstico de solo lectura: vuelve a descubrir los documentos de
+    `seccion_titulo` (con el heurístico de ícono ya corregido, basado en
+    <span>, no <img>) y compara indice_marca_derogado de cada documento
+    contra el estado_vigencia YA CORREGIDO de sus fragmentos en la BD
+    (no descarga ni reingiere nada, usa lo ya almacenado). No escribe
+    nada en la BD.
+
+    LIMITACIÓN CONOCIDA (ver ingestar_documento): indice_marca_derogado
+    es una señal por DOCUMENTO completo (una fila del índice), mientras
+    que un documento consolidado como el Estatuto Tributario tiene
+    cientos de artículos con estados distintos entre sí. Para ese caso
+    es ESPERABLE que el ícono (nunca "derogado" para el documento
+    completo) no coincida con muchos de sus artículos individuales — no
+    es indicativo de un bug. Cada caso de desacuerdo se marca con
+    `es_documento_consolidado` para que se pueda filtrar ese ruido
+    esperado y enfocarse en desacuerdos reales sobre documentos atómicos
+    (una ley/decreto con pocos artículos)."""
+    documentos = descubrir_urls_seccion(seccion_titulo, limite=limite)
+    conteo_icono = contar_marca_derogado(documentos)
+
+    casos_desacuerdo = []
+    documentos_evaluados = 0
+    for doc in documentos:
+        url_base = doc.url.split("#")[0]
+        fragmentos = db.query(Norma).filter(Norma.url_fuente.like(f"{url_base}%")).all()
+        if not fragmentos:
+            continue
+        documentos_evaluados += 1
+
+        estados = [f.estado_vigencia for f in fragmentos]
+        hay_derogado_en_texto = "derogado" in estados
+
+        if doc.indice_marca_derogado is True and not hay_derogado_en_texto:
+            tipo = "indice_derogado_pero_texto_no"
+        elif doc.indice_marca_derogado is False and hay_derogado_en_texto:
+            tipo = "indice_no_derogado_pero_texto_si"
+        else:
+            continue
+
+        casos_desacuerdo.append(
+            {
+                "tipo_desacuerdo": tipo,
+                "url": doc.url,
+                "titulo": doc.titulo,
+                "indice_marca_derogado": doc.indice_marca_derogado,
+                "total_fragmentos_en_bd": len(fragmentos),
+                "fragmentos_derogados_en_bd": sum(1 for e in estados if e == "derogado"),
+                "es_documento_consolidado": _tipo_norma_desde_url(doc.url) == "articulo_et",
+            }
+        )
+
+    return {
+        "seccion": seccion_titulo,
+        "documentos_descubiertos": len(documentos),
+        "documentos_evaluados_con_fragmentos_en_bd": documentos_evaluados,
+        "deteccion_icono_vigencia_indice": conteo_icono,
+        "casos_desacuerdo": casos_desacuerdo,
+    }
+
+
 def ingestar_documento(
     db: Session,
     url: str,
