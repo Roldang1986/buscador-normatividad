@@ -258,30 +258,62 @@ def _extraer_articulos(texto_completo: str) -> list[tuple[str | None, str]]:
     return fragmentos
 
 
+# Firma real (evidencia: estatuto_tributario.htm) de un anexo de "valores
+# absolutos reexpresados en UVT" al final del ET, que produce MUCHOS
+# falsos positivos de ARTICULO_HEADER_RE (numero_articulo '476', '499',
+# '521', '523', '544', '545', '7', y probablemente más): filas de tabla
+# como "NUMERAL 21 E.T.\n...\n17\nPRIMER VALOR\n3.576.812.000\n180.000",
+# "E.T.\n71.000\n4" o "LITERAL b) y d)\n2\n816.000\n41" — todas empiezan
+# con mayúscula (igual que un título real), por eso "empieza en
+# mayúscula" solo NO alcanza para distinguirlas de un header real.
+_PATRON_FILA_TABLA_UVT_RE = re.compile(
+    r"^(?:E\.T\.|NUMERAL\s+\d|LITERAL\s+[a-záéíóúñ]\))", re.IGNORECASE
+)
+_PATRON_NUMERO_CON_SEPARADOR_MILES_RE = re.compile(r"\d{1,3}(?:\.\d{3})+")
+
+
 def _parece_inicio_de_titulo(texto_fragmento: str) -> bool:
     """True si, justo después del número de artículo que hizo matchear
     ARTICULO_HEADER_RE, sigue algo que parece el título real de un
-    artículo (empieza con mayúscula) — confirmado en decenas de ejemplos
-    reales a lo largo de esta sesión (todos los títulos reales vistos
-    empiezan así: "HECHO GENERADOR DEL GMF.", "SERVICIOS EXCLUIDOS DEL
-    IMPUESTO SOBRE LAS VENTAS -IVA-.", "TARIFA GENERAL PARA PERSONAS
-    JURÍDICAS.", etc. — el español legal en mayúsculas nunca arranca un
-    título con minúscula).
+    artículo — confirmado en decenas de ejemplos reales a lo largo de
+    esta sesión (todos los títulos reales vistos: "HECHO GENERADOR DEL
+    GMF.", "SERVICIOS EXCLUIDOS DEL IMPUESTO SOBRE LAS VENTAS -IVA-.",
+    "TARIFA GENERAL PARA PERSONAS JURÍDICAS.", etc.) empiezan en
+    mayúscula y sostienen un mínimo de texto de título antes de saltar de
+    línea o toparse con un dígito suelto.
 
-    Evidencia real del caso contrario (falso positivo de
-    ARTICULO_HEADER_RE): en estatuto_tributario.htm, numero_articulo
-    '476' aparece 2 veces — la 1a ocurrencia es una cita cruzada dentro
-    de OTRO artículo ("...conforme al artículo 476 numeral 6o, el
-    impuesto se liquidará...") que el regex matcheó como si fuera un
-    header nuevo porque _texto_plano() mete un salto de línea entre
-    "artículo" y "476" (el número referenciado vive en su propio <a>) y
-    \\s+ cruza saltos de línea sin problema; el cuerpo que le sigue
-    ("numeral 6o, el impuesto...") empieza en minúscula. La 2a ocurrencia
-    sí es el header real: "SERVICIOS EXCLUIDOS DEL IMPUESTO SOBRE LAS
-    VENTAS -IVA-.", con sus 31 numerales."""
+    Evidencia real del caso que motivó esto: en estatuto_tributario.htm,
+    numero_articulo '476' aparece 3 veces — la 1a es una cita cruzada
+    espuria dentro de OTRO artículo ("...conforme al artículo 476
+    numeral 6o, el impuesto se liquidará...", cuerpo en minúscula), la 2a
+    es el header real ("SERVICIOS EXCLUIDOS DEL IMPUESTO SOBRE LAS VENTAS
+    -IVA-.", con sus 31 numerales), y la 3a es una fila del anexo de
+    valores UVT ("NUMERAL 21 E.T....") que SÍ empieza en mayúscula.
+
+    UN PRIMER INTENTO que solo chequeaba "empieza en mayúscula" falló en
+    los dos sentidos con datos reales: no distinguía la 2a ocurrencia
+    real de la 3a espuria del 476 (ambigüedad → no corregía nada), Y
+    producía un falso positivo en numero_articulo '7' (dos filas de la
+    misma tabla UVT, "ART. 7\\n7\\n2.856.000..." y "ART. \\n7\\n LITERAL
+    b) y d)\\n2\\n816.000...", donde la segunda —igual de espuria—
+    empieza en mayúscula y "ganaba" por parecer más título). De ahí los
+    dos chequeos adicionales: excluir explícitamente la firma de esa
+    tabla, y exigir un mínimo de texto de título antes del primer salto
+    de línea o dígito."""
     m = ARTICULO_HEADER_RE.match(texto_fragmento)
     cuerpo = texto_fragmento[m.end():].lstrip() if m else texto_fragmento.lstrip()
-    return bool(cuerpo) and cuerpo[0].isalpha() and cuerpo[0].isupper()
+    if not cuerpo or not cuerpo[0].isalpha() or not cuerpo[0].isupper():
+        return False
+
+    ventana = cuerpo[:150]
+    if _PATRON_FILA_TABLA_UVT_RE.match(ventana):
+        return False
+    if _PATRON_NUMERO_CON_SEPARADOR_MILES_RE.search(ventana):
+        return False
+
+    corte = re.search(r"[\n0-9]", ventana)
+    largo_titulo = corte.start() if corte else len(ventana)
+    return largo_titulo >= 15
 
 
 def _resolver_numeros_duplicados(
