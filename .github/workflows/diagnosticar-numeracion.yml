@@ -15,6 +15,14 @@ on:
         description: "numero_articulo puntual a verificar junto con verificar_cobertura_url (opcional)"
         required: false
         default: ""
+      inspeccionar_busqueda_pregunta:
+        description: "Si se pasa, corre buscar_fragmentos_relevantes() directamente (sin agente, sin llamada a Anthropic) con esta pregunta y muestra los top_k candidatos crudos"
+        required: false
+        default: ""
+      inspeccionar_busqueda_numero_articulo:
+        description: "numero_articulo a verificar si está entre los candidatos de inspeccionar_busqueda_pregunta (opcional); si no está, muestra su texto completo almacenado"
+        required: false
+        default: ""
 
 jobs:
   diagnostico:
@@ -22,8 +30,9 @@ jobs:
     env:
       # app.database exige DATABASE_URL al importarse (RuntimeError si
       # falta), aunque el diagnóstico de numeración no ejecute ninguna
-      # consulta (el de cobertura sí, en modo de solo lectura).
+      # consulta (los otros dos modos sí, en modo de solo lectura).
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +44,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -51,5 +60,18 @@ jobs:
           ARGS=(scripts/verificar_cobertura_documento.py "$URL_DOCUMENTO")
           if [ -n "$ARTICULO" ]; then
             ARGS+=(--articulo "$ARTICULO")
+          fi
+          python "${ARGS[@]}"
+
+      - name: Inspeccionar búsqueda semántica (solo lectura, con BD + Voyage)
+        if: ${{ github.event.inputs.inspeccionar_busqueda_pregunta != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PREGUNTA: ${{ github.event.inputs.inspeccionar_busqueda_pregunta }}
+          NUMERO_ARTICULO: ${{ github.event.inputs.inspeccionar_busqueda_numero_articulo }}
+        run: |
+          ARGS=(scripts/inspeccionar_busqueda_semantica.py "$PREGUNTA")
+          if [ -n "$NUMERO_ARTICULO" ]; then
+            ARGS+=(--numero-articulo "$NUMERO_ARTICULO")
           fi
           python "${ARGS[@]}"
