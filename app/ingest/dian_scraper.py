@@ -854,6 +854,120 @@ def verificar_icono_vs_texto(db: Session, seccion_titulo: str, limite: int | Non
     }
 
 
+def _filas_a_corregir_por_asimetria_documento_simple(db: Session, seccion_titulo: str, limite: int | None) -> list[dict]:
+    """Lógica compartida de solo lectura entre
+    verificar_correccion_documentos_simples_derogados y
+    aplicar_correccion_documentos_simples_derogados: vuelve a descubrir
+    los documentos de `seccion_titulo`, y para cada uno con
+    indice_marca_derogado=True y _es_documento_simple_atomico(...)=True
+    (según los numero_articulo YA almacenados en la BD para ese
+    documento), identifica las filas cuyo estado_vigencia actual no es ya
+    "derogado" — exactamente el mismo criterio que aplica
+    ingestar_documento de forma prospectiva a partir de ahora, aplicado
+    aquí de forma retroactiva a filas insertadas antes de este ajuste."""
+    documentos = descubrir_urls_seccion(seccion_titulo, limite=limite)
+    filas_a_corregir = []
+    for doc in documentos:
+        if doc.indice_marca_derogado is not True:
+            continue
+        url_base = doc.url.split("#")[0]
+        fragmentos = db.query(Norma).filter(Norma.url_fuente.like(f"{url_base}%")).all()
+        if not fragmentos:
+            continue
+        if not _es_documento_simple_atomico([f.numero_articulo for f in fragmentos], len(fragmentos)):
+            continue
+        for f in fragmentos:
+            if f.estado_vigencia != "derogado":
+                filas_a_corregir.append(
+                    {
+                        "id": f.id,
+                        "url_fuente": f.url_fuente,
+                        "titulo_documento": doc.titulo,
+                        "estado_actual": f.estado_vigencia,
+                        "nota_actual": f.nota_vigencia,
+                        "total_fragmentos_documento": len(fragmentos),
+                    }
+                )
+    return filas_a_corregir
+
+
+def verificar_correccion_documentos_simples_derogados(db: Session, seccion_titulo: str, limite: int | None = None) -> dict:
+    """Diagnóstico de solo lectura (no escribe nada): reporta, para
+    `seccion_titulo`, cuántas filas YA insertadas quedarían corregidas de
+    estado_vigencia a "derogado" bajo la nueva regla de la asimetría
+    índice-vs-texto en documentos simples/atómicos (ver docstring de
+    ingestar_documento). Pensado para correr ANTES de
+    aplicar_correccion_documentos_simples_derogados, nunca junto con ella
+    en la misma invocación."""
+    filas = _filas_a_corregir_por_asimetria_documento_simple(db, seccion_titulo, limite)
+    return {
+        "seccion": seccion_titulo,
+        "filas_a_corregir": len(filas),
+        "detalle": filas,
+    }
+
+
+def aplicar_correccion_documentos_simples_derogados(db: Session, seccion_titulo: str, limite: int | None = None) -> dict:
+    """Corrige EN EL LUGAR (solo estado_vigencia y nota_vigencia, nunca
+    url_fuente/texto/embedding) las filas identificadas por
+    verificar_correccion_documentos_simples_derogados. Nunca se corre en
+    la misma invocación que el diagnóstico de solo lectura."""
+    filas = _filas_a_corregir_por_asimetria_documento_simple(db, seccion_titulo, limite)
+    actualizadas = 0
+    for fila in filas:
+        norma = db.query(Norma).get(fila["id"])
+        norma.estado_vigencia = "derogado"
+        if not norma.nota_vigencia:
+            norma.nota_vigencia = (
+                "Documento marcado como derogado en el índice de "
+                "normograma (ícono de vigencia); el texto de este "
+                "artículo no traía nota de vigencia propia — se usa el "
+                "índice como fuente de verdad por tratarse de un "
+                "documento corto/atómico (ver asimetría documentada en "
+                "ingestar_documento)."
+            )
+        actualizadas += 1
+    db.commit()
+    return {
+        "seccion": seccion_titulo,
+        "filas_revisadas": len(filas),
+        "filas_actualizadas": actualizadas,
+    }
+
+
+# Umbral de "pocos artículos" para la asimetría de confiabilidad
+# índice-vs-texto documentada abajo. Elegido para separar claramente
+# decretos modificatorios cortos (evidencia real: decreto_0165_2024.htm,
+# decreto_0771_2025.htm, etc., todos con menos de 10 artículos) de
+# códigos compilados grandes (decreto_1625_2016.htm: 2421 fragmentos;
+# Estatuto Tributario: 1000+), sin depender de un número exacto.
+UMBRAL_FRAGMENTOS_DOCUMENTO_SIMPLE = 20
+
+
+def _es_documento_simple_atomico(numeros_articulo: list[str | None], total_fragmentos: int) -> bool:
+    """True si el documento es "corto/atómico" en el sentido de la
+    asimetría de confiabilidad índice-vs-texto (ver docstring de
+    ingestar_documento): pocos artículos, o ninguno con numeración
+    jerárquica profunda tipo Decreto Único Reglamentario (p. ej.
+    "1.2.1.7.1", con varios puntos). Para esos documentos, confirmado con
+    evidencia real (decreto_0165_2024.htm figura "(DEROGADO)" en su
+    propio título de normograma sin que ninguno de sus artículos traiga
+    nota de vigencia retroactiva), el ícono del índice es MÁS confiable
+    que la ausencia de nota en el texto.
+
+    Se usa tanto al ingerir (con los fragmentos recién extraídos) como al
+    corregir registros ya insertados (con los numero_articulo ya
+    almacenados en la BD para ese documento) — ver
+    verificar_correccion_documentos_simples_derogados /
+    aplicar_correccion_documentos_simples_derogados."""
+    if total_fragmentos < UMBRAL_FRAGMENTOS_DOCUMENTO_SIMPLE:
+        return True
+    tiene_numeracion_jerarquica_profunda = any(
+        numero and numero.count(".") >= 2 for numero in numeros_articulo
+    )
+    return not tiene_numeracion_jerarquica_profunda
+
+
 def ingestar_documento(
     db: Session,
     url: str,
@@ -891,7 +1005,22 @@ def ingestar_documento(
     nunca está "derogado"), comparar ese único valor contra cada uno de
     sus ~1000+ artículos —muchos legítimamente derogados/modificados en
     el texto— generará muchas advertencias esperables, no indicativas de
-    un bug. Revisar el volumen de advertencias con ese contexto."""
+    un bug. Revisar el volumen de advertencias con ese contexto.
+
+    ASIMETRÍA CONFIRMADA (evidencia real, sección "1.3. Decreto Único
+    Reglamentario en Materia Tributaria", 5 documentos: decreto_0771_2025,
+    decreto_0174_2025, decreto_1006_2024, decreto_0165_2024,
+    decreto_0128_2024): para decretos modificatorios CORTOS (pocos
+    artículos, sin numeración jerárquica profunda tipo DUR), es el ÍCONO
+    del índice el que es más confiable, no el texto — decreto_0165_2024.htm
+    figura "(DEROGADO)" en su propio título de normograma, pero ninguno de
+    sus artículos individuales trae nota de vigencia retroactiva en el
+    texto (a diferencia de códigos compilados grandes como el ET o el
+    Decreto 1625, que sí reciben notas por artículo). Por eso, cuando
+    `indice_marca_derogado=True` y `_es_documento_simple_atomico(...)` es
+    True, el índice se usa como fuente de verdad y se fuerza
+    estado_vigencia="derogado" si el texto no traía ya su propia nota
+    (nunca se sobrescribe un estado ya derivado del texto)."""
     html = descargar_html(url)
     texto_completo = _texto_plano(html)
     tipo_norma = _tipo_norma_desde_url(url)
@@ -899,6 +1028,10 @@ def ingestar_documento(
     fragmentos, advertencias = _resolver_numeros_duplicados(fragmentos)
     if limite_fragmentos is not None:
         fragmentos = fragmentos[:limite_fragmentos]
+
+    documento_simple = _es_documento_simple_atomico(
+        [n for n, _ in fragmentos], len(fragmentos)
+    )
 
     insertados = 0
     for numero_articulo, texto in fragmentos:
@@ -916,7 +1049,23 @@ def ingestar_documento(
 
         if indice_marca_derogado is not None:
             texto_dice_derogado = estado_vigencia == "derogado"
-            if texto_dice_derogado != indice_marca_derogado:
+            if indice_marca_derogado and documento_simple and not texto_dice_derogado:
+                estado_vigencia = "derogado"
+                nota_vigencia = nota_vigencia or (
+                    "Documento marcado como derogado en el índice de "
+                    "normograma (ícono de vigencia); el texto de este "
+                    "artículo no traía nota de vigencia propia — se usa "
+                    "el índice como fuente de verdad por tratarse de un "
+                    "documento corto/atómico (ver asimetría documentada "
+                    "en ingestar_documento)."
+                )
+                advertencias.append(
+                    f"{url_fuente}: estado_vigencia corregido a 'derogado' "
+                    "según el ícono del índice (documento corto/atómico "
+                    "sin numeración jerárquica profunda) — el texto no "
+                    "traía nota de vigencia propia."
+                )
+            elif texto_dice_derogado != indice_marca_derogado:
                 advertencias.append(
                     f"{url_fuente}: el índice marca "
                     f"{'derogado' if indice_marca_derogado else 'no derogado'} "
