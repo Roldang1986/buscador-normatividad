@@ -36,6 +36,18 @@ from app.ingest.dian_scraper import (
 # realmente a esa ancla).
 ANCLA_RE = re.compile(r'<a[^>]+(?:name|id)\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
+# Patrones para extraer, del propio texto de un artículo duplicado, el
+# número "correcto" que el compilador ya da explícitamente — un error
+# tipográfico del decreto original ("<sic, es 1.2.7.1.8>") o una
+# renumeración posterior ("renumerado... Consultar artículo 1.3.1.12.24").
+# Encontrados con evidencia real en decreto_1625_2016.htm: al menos 3 de
+# 5 numero_articulo duplicados ya traen su corrección explícita en el
+# propio texto, no son duplicados sin resolver.
+CORRECCION_SIC_RE = re.compile(r"sic,?\s*es\s+([0-9]+(?:\.[0-9]+)*)", re.IGNORECASE)
+CORRECCION_RENUMERADO_RE = re.compile(
+    r"[Cc]onsultar\s+art[íi]culo\s+([0-9]+(?:\.[0-9]+)*)", re.IGNORECASE
+)
+
 
 def inspeccionar_anclas_reales(html: str, numeros_de_interes: list[str]) -> None:
     anclas = ANCLA_RE.findall(html)
@@ -81,6 +93,7 @@ def diagnosticar_documento(url: str) -> None:
 
         repetidos = {n: c for n, c in Counter(numeros_todos).items() if c > 1}
         print(f"  numero_articulo repetidos ({len(repetidos)} valores distintos) — texto completo de cada caso:")
+        candidatos_correccion: dict[int, str] = {}  # índice de match -> numero corregido
         for numero, veces in repetidos.items():
             posiciones = [i for i, n in enumerate(numeros_todos) if n == numero]
             print(f"\n  --- {numero!r} aparece {veces} veces ---")
@@ -88,9 +101,21 @@ def diagnosticar_documento(url: str) -> None:
                 m = matches[i]
                 fin = matches[i + 1].start() if i + 1 < len(matches) else len(texto)
                 fragmento_completo = texto[m.end() : fin].strip()
-                print(f"    pos {i}: {fragmento_completo[:400]!r}")
+                print(f"    pos {i}: {fragmento_completo[:800]!r}")
 
-        inspeccionar_anclas_reales(html, list(repetidos.keys()))
+                m_sic = CORRECCION_SIC_RE.search(fragmento_completo[:1000])
+                m_renum = CORRECCION_RENUMERADO_RE.search(fragmento_completo[:1000])
+                if m_sic:
+                    candidatos_correccion[i] = m_sic.group(1)
+                    print(f"      -> corrección <sic, es ...> detectada: {m_sic.group(1)!r}")
+                elif m_renum:
+                    candidatos_correccion[i] = m_renum.group(1)
+                    print(f"      -> renumeración 'Consultar artículo ...' detectada: {m_renum.group(1)!r}")
+                else:
+                    print("      -> sin corrección explícita detectada en el texto (posible duplicado sin resolver)")
+
+        numeros_corregidos = sorted(set(candidatos_correccion.values()))
+        inspeccionar_anclas_reales(html, list(repetidos.keys()) + numeros_corregidos)
     print("Primeros 15 números detectados (en orden, con repetidos si los hay):", numeros_todos[:15])
 
     # Señal de posible truncamiento: el número detectado termina en punto u
