@@ -34,8 +34,16 @@ def diagnosticar_documento(url: str) -> None:
     texto = _texto_plano(html)
 
     matches = list(ARTICULO_HEADER_RE.finditer(texto))
+    numeros_todos = [m.group(1) for m in matches]
+    numeros_unicos = sorted(set(numeros_todos), key=numeros_todos.index)
     print(f"Encabezados de artículo detectados (ARTICULO_HEADER_RE): {len(matches)}")
-    print("Primeros 15 números detectados:", [m.group(1) for m in matches[:15]])
+    print(f"numero_articulo ÚNICOS entre esos encabezados: {len(numeros_unicos)}")
+    if len(numeros_unicos) < len(matches):
+        print(
+            f"  (¡{len(matches) - len(numeros_unicos)} encabezados comparten numero_articulo "
+            "con otro — posible colapso/truncamiento!)"
+        )
+    print("Primeros 15 números detectados (en orden, con repetidos si los hay):", numeros_todos[:15])
 
     # Señal de posible truncamiento: el número detectado termina en punto u
     # guión, o el texto inmediatamente después del match sigue con un
@@ -60,6 +68,18 @@ def diagnosticar_documento(url: str) -> None:
             print(" ", json.dumps(s, ensure_ascii=False))
     else:
         print(f"\nSin señales de truncamiento en los primeros {min(300, len(matches))} encabezados.")
+
+    # Muestra repartida a lo largo de TODO el documento (no solo el
+    # principio) para confirmar visualmente que la numeración jerárquica
+    # se extrae bien también en artículos avanzados, no solo al inicio.
+    if matches:
+        paso = max(1, len(matches) // 8)
+        indices_muestra = list(range(0, len(matches), paso))[:8]
+        print("\nMuestra de headers repartida a lo largo del documento:")
+        for i in indices_muestra:
+            m = matches[i]
+            contexto = texto[m.end() : m.end() + 60].replace("\n", " ").strip()
+            print(f"  [{i}] numero_articulo={m.group(1)!r}  texto_siguiente={contexto!r}")
 
     fragmentos = _extraer_articulos(texto)
     print(f"\nFragmentos que produciría _extraer_articulos: {len(fragmentos)}")
