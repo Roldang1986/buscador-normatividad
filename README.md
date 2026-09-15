@@ -85,8 +85,10 @@ Railway detecta el proyecto como Python vía Nixpacks e instala
 producción, no solo para `--reload` en desarrollo local).
 
 Variables de entorno a configurar en el servicio de Railway (mismas que
-`.env.example`): `DATABASE_URL`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, y
-opcionalmente `VOYAGE_EMBEDDING_MODEL`/`VOYAGE_EMBEDDING_DIM`.
+`.env.example`): `DATABASE_URL`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`,
+`INGESTA_API_KEY` (protege `POST /ingesta/norma`, ver sección Endpoints —
+si falta, ese endpoint rechaza todos los requests), y opcionalmente
+`VOYAGE_EMBEDDING_MODEL`/`VOYAGE_EMBEDDING_DIM`.
 
 **Las migraciones de Alembic NO se ejecutan automáticamente al arrancar
 el servidor** — `startCommand` solo levanta uvicorn, sin `alembic
@@ -151,8 +153,10 @@ normatividad indexada, sin completar con conocimiento general.
 ### `POST /ingesta/norma`
 
 Inserta manualmente una norma de prueba (calcula su embedding y la guarda).
-**Sin autenticación todavía** — ver el `TODO` en `app/main.py`; no debe
-exponerse públicamente en este estado.
+Requiere el header `X-API-Key` con el valor de la variable de entorno
+`INGESTA_API_KEY`; responde 401 si falta, no coincide, o si la variable no
+está configurada en el entorno (falla cerrado, nunca abierto por defecto).
+No es autenticación de usuario real — solo evita inserciones anónimas.
 
 ```json
 {
@@ -189,4 +193,6 @@ documento. Ver el docstring del módulo para más detalle.
 
 ## Pendiente
 
-- Autenticación (incluyendo proteger `/ingesta/norma`)
+- Autenticación de usuario real (lo que hay hoy en `/ingesta/norma` es
+  solo un API key compartido por header, no sesiones/usuarios)
+- Proteger `/consulta` si se expone a más que el propio frontend
