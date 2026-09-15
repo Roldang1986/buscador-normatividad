@@ -60,6 +60,11 @@ on:
         required: false
         type: boolean
         default: false
+      diagnosticar_seccion_nueva:
+        description: "Diagnóstico de SOLO LECTURA (no inserta nada en la BD) antes de escalar una sección nueva: descubre 'limite' documentos de 'seccion' y reporta por documento estado_vigencia (índice vs. texto), patrones de header/nota de vigencia no capturados por los regex actuales, y artículos que superan el umbral de dilución por longitud (>=26,627 chars) o que ya calificarían para fragmentación por numeral. No corre el scraper normal en la misma invocación."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   scraper:
@@ -85,6 +90,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Scraper DIAN (subconjunto de prueba)
+        if: ${{ github.event.inputs.diagnosticar_seccion_nueva != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           SECCION: ${{ github.event.inputs.seccion }}
@@ -128,6 +134,14 @@ jobs:
             ARGS+=(--corregir-asimetria-derogado)
           fi
           python "${ARGS[@]}"
+
+      - name: Diagnóstico de sección nueva (solo lectura, sin BD)
+        if: ${{ github.event.inputs.diagnosticar_seccion_nueva == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          SECCION: ${{ github.event.inputs.seccion }}
+          LIMITE: ${{ github.event.inputs.limite }}
+        run: python scripts/diagnosticar_seccion.py "$SECCION" --limite "$LIMITE"
 
       - name: Diagnóstico de DOM (solo lectura, sobre el HTML ya guardado)
         if: always()
