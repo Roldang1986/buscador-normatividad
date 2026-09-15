@@ -8,7 +8,7 @@ ni scrapers reales; el endpoint de ingesta es manual, solo para pruebas.
 
 ```
 app/
-├── main.py       # instancia de FastAPI + endpoints (/consulta, /ingesta/norma)
+├── main.py       # instancia de FastAPI + endpoints (/consulta, /norma/{id}, /ingesta/norma)
 ├── agent.py      # agente RAG: búsqueda semántica + llamada a Claude
 ├── embeddings.py # cliente de embeddings (Voyage AI)
 ├── models.py     # modelos SQLAlchemy (tabla `norma`)
@@ -18,6 +18,8 @@ app/
     └── dian_scraper.py  # scraper de normograma.dian.gov.co (ver abajo)
 
 alembic/          # migraciones de base de datos
+
+frontend/         # PWA (React + Vite) — ver "Frontend" más abajo
 ```
 
 ## Requisitos
@@ -87,7 +89,10 @@ producción, no solo para `--reload` en desarrollo local).
 Variables de entorno a configurar en el servicio de Railway (mismas que
 `.env.example`): `DATABASE_URL`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`,
 `INGESTA_API_KEY` (protege `POST /ingesta/norma`, ver sección Endpoints —
-si falta, ese endpoint rechaza todos los requests), y opcionalmente
+si falta, ese endpoint rechaza todos los requests), `CORS_ALLOWED_ORIGINS`
+(necesaria para que el frontend en `frontend/` pueda llamar a la API desde
+el navegador — agregar ahí la URL real donde quede publicado, separadas
+por comas si hay más de una), y opcionalmente
 `VOYAGE_EMBEDDING_MODEL`/`VOYAGE_EMBEDDING_DIM`.
 
 **Las migraciones de Alembic NO se ejecutan automáticamente al arrancar
@@ -150,6 +155,25 @@ normatividad indexada, sin completar con conocimiento general.
 }
 ```
 
+### `GET /norma/{id}`
+
+Devuelve una fila de `norma` completa, incluido el campo `texto` íntegro
+(la respuesta de `/consulta` solo trae metadata por fuente, no el texto
+completo). Sin autenticación — es lectura pública, igual que `/consulta`.
+404 si el id no existe. Usado por el frontend para el botón "Ver texto
+completo" de cada fuente citada.
+
+```json
+// Response
+{
+  "id": 468, "tipo_norma": "articulo_et", "numero_articulo": "468",
+  "fuente": "Estatuto Tributario art. 468", "url_fuente": null,
+  "texto": "La tarifa general del impuesto sobre las ventas es del 19%.",
+  "estado_vigencia": "vigente", "nota_vigencia": null,
+  "fecha_ingesta": "2026-01-01T00:00:00Z"
+}
+```
+
 ### `POST /ingesta/norma`
 
 Inserta manualmente una norma de prueba (calcula su embedding y la guarda).
@@ -191,8 +215,57 @@ de 2022: 153 fragmentos, 4 derogados). Un desacuerdo entre el ícono del
 un bug de detección — depende de cuántos artículos propios tenga el
 documento. Ver el docstring del módulo para más detalle.
 
+## Frontend (`frontend/`)
+
+PWA en React + Vite (JavaScript plano, sin TypeScript). Primera versión:
+caja de pregunta contra `POST /consulta`, tarjetas de fuentes citadas
+(con aviso visual si `estado_vigencia` es `modificado`/`derogado`), botón
+para ver el texto completo de una fuente (`GET /norma/{id}`) en un modal,
+link a la fuente oficial (`url_fuente`), historial de preguntas en
+`localStorage` (no hay autenticación de usuario), y manifest +
+service worker mínimos para que sea instalable.
+
+Setup local:
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # ajustar VITE_API_BASE_URL si el backend corre en localhost
+npm run dev
+```
+
+`VITE_API_BASE_URL` apunta por defecto a la URL de producción en Railway.
+Para desarrollo contra un backend local, necesitas correr el backend con
+`CORS_ALLOWED_ORIGINS` incluyendo `http://localhost:5173` (ya es el valor
+por defecto de `.env.example` del backend).
+
+Estructura:
+
+```
+frontend/
+├── public/
+│   ├── manifest.json   # PWA manifest
+│   ├── sw.js           # service worker mínimo (cache-first solo para assets propios)
+│   └── icon-*.png      # íconos placeholder — reemplazar antes de producción real
+└── src/
+    ├── api.js          # llamadas fetch a /consulta y /norma/{id}
+    ├── useHistorial.js # hook: historial de preguntas en localStorage
+    ├── App.jsx
+    └── components/
+        ├── CajaPregunta.jsx
+        ├── Respuesta.jsx
+        ├── TarjetaFuente.jsx
+        ├── ModalTexto.jsx   # "Ver texto completo" (GET /norma/{id})
+        └── Historial.jsx
+```
+
+No incluye ningún llamado a `POST /ingesta/norma` — ese endpoint sigue
+siendo solo para uso administrativo/manual con `X-API-Key`.
+
 ## Pendiente
 
 - Autenticación de usuario real (lo que hay hoy en `/ingesta/norma` es
   solo un API key compartido por header, no sesiones/usuarios)
 - Proteger `/consulta` si se expone a más que el propio frontend
+- Pasada de diseño real del frontend (hoy solo tiene layout funcional
+  mínimo) e íconos de PWA definitivos (los actuales son placeholders)

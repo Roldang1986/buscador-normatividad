@@ -1,0 +1,146 @@
+/* Estilos mínimos de layout — pendiente pasada de diseño real. */
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1rem;
+  font-family: system-ui, sans-serif;
+}
+
+.app__encabezado {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.app__error {
+  color: #b00020;
+}
+
+.caja-pregunta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.caja-pregunta textarea {
+  font: inherit;
+  padding: 0.5rem;
+}
+
+.respuesta {
+  margin-top: 1rem;
+}
+
+.respuesta__fuentes-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tarjeta-fuente {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.tarjeta-fuente--alerta {
+  border-color: #b00020;
+}
+
+.tarjeta-fuente__encabezado {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tarjeta-fuente__estado {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: #eee;
+}
+
+.tarjeta-fuente__estado--modificado,
+.tarjeta-fuente__estado--derogado {
+  background: #fdecea;
+  color: #b00020;
+  font-weight: bold;
+}
+
+.tarjeta-fuente__acciones {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.historial {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 300px;
+  height: 100vh;
+  background: white;
+  border-left: 1px solid #ccc;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.historial__encabezado {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.historial__lista {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.historial__lista button {
+  text-align: left;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.modal-fondo {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal-contenido {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  max-width: 640px;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.modal-cerrar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+}
+
+.modal-texto {
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
+.modal-error {
+  color: #b00020;
+}

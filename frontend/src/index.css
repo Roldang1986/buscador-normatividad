@@ -1,0 +1,9 @@
+/* Reset mínimo — la pasada de diseño real queda para después del scaffolding. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}

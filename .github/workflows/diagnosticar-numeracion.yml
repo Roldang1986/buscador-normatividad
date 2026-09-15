@@ -85,6 +85,18 @@ on:
         description: "numero_articulo(s) a fragmentar con aplicar_fragmentacion_url, separados por espacio (ej. '879 477')"
         required: false
         default: ""
+      borrar_fila_id:
+        description: "MODO DE ESCRITURA: borra por id una fila puntual de `norma` (ej. una fila de prueba). Requiere borrar_fila_tipo_norma_esperado y borrar_fila_texto_esperado — si el contenido de la fila no coincide exactamente, aborta sin borrar nada."
+        required: false
+        default: ""
+      borrar_fila_tipo_norma_esperado:
+        description: "tipo_norma esperado de la fila a borrar con borrar_fila_id (verificación de seguridad)"
+        required: false
+        default: ""
+      borrar_fila_texto_esperado:
+        description: "texto esperado de la fila a borrar con borrar_fila_id (verificación de seguridad)"
+        required: false
+        default: ""
 
 jobs:
   diagnostico:
@@ -106,7 +118,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' && github.event.inputs.borrar_fila_id == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -207,3 +219,12 @@ jobs:
           URL_DOCUMENTO: ${{ github.event.inputs.aplicar_fragmentacion_url }}
           ARTICULOS: ${{ github.event.inputs.aplicar_fragmentacion_articulos }}
         run: python scripts/aplicar_fragmentacion_numeral.py "$URL_DOCUMENTO" $ARTICULOS
+
+      - name: Borrar fila puntual por id (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.borrar_fila_id != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          FILA_ID: ${{ github.event.inputs.borrar_fila_id }}
+          TIPO_NORMA_ESPERADO: ${{ github.event.inputs.borrar_fila_tipo_norma_esperado }}
+          TEXTO_ESPERADO: ${{ github.event.inputs.borrar_fila_texto_esperado }}
+        run: python scripts/borrar_fila_por_id.py "$FILA_ID" "$TIPO_NORMA_ESPERADO" "$TEXTO_ESPERADO"
