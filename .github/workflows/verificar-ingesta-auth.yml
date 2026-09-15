@@ -1,0 +1,29 @@
+name: Verificar autenticación de /ingesta/norma en producción
+
+# Workflow puntual de diagnóstico: corre el curl de prueba contra la URL
+# real de producción (Railway) usando el secret INGESTA_API_KEY como
+# header X-API-Key, e imprime la respuesta completa en los logs.
+#
+# Nota: esto inserta una fila real ("test"/"prueba de autenticacion") en
+# la tabla `norma` de producción si la autenticación pasa — no es un dry
+# run, usa exactamente el body de prueba pedido.
+#
+# Requiere que INGESTA_API_KEY esté configurado como secret del
+# repositorio (Settings > Secrets and variables > Actions) — es un
+# secret de GitHub Actions independiente de la variable de entorno del
+# mismo nombre en Railway, aunque deban tener el mismo valor para que
+# esta prueba tenga sentido.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl contra POST /ingesta/norma en producción
+        run: |
+          curl -sS -i -X POST https://buscador-normatividad-production.up.railway.app/ingesta/norma \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${{ secrets.INGESTA_API_KEY }}" \
+            -d '{"tipo_norma":"test","texto":"prueba de autenticacion","fuente":"test","estado_vigencia":"vigente"}'
