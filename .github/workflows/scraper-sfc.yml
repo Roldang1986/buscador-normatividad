@@ -1,0 +1,74 @@
+name: Scraper SFC (ingesta)
+
+# Solo manual por ahora (workflow_dispatch). La primera corrida es la
+# ingesta completa de los 3.431 registros de `ac` — una vez confirmado que
+# corre limpio, se puede agregar un trigger `schedule:` para correrlo
+# periódicamente. No agregar el cron todavía.
+on:
+  workflow_dispatch:
+    inputs:
+      coleccion:
+        description: "Colección a ingerir (ac = Doctrina y conceptos, la única censada/validada hasta ahora — ver Ingest/SFC/README.md)"
+        required: false
+        default: "ac"
+        type: choice
+        options:
+          - ac
+          - af
+          - aj
+      paginas:
+        description: "Máximo de páginas a recorrer (25 registros/página). 138 cubre las 3.431 de `ac` completas; usar un número chico (ej. 2) para probar antes de lanzar la corrida completa."
+        required: false
+        default: "138"
+      pausa:
+        description: "Segundos de espera entre páginas (throttling contra el sitio real)"
+        required: false
+        default: "1.0"
+
+jobs:
+  ingesta:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias Python
+        run: pip install -r requirements.txt
+
+      - name: Instalar antiword (extracción de .doc OLE legado, ver Ingest/SFC/README.md) y psql
+        run: sudo apt-get update && sudo apt-get install -y antiword postgresql-client
+
+      - name: Aplicar schema.sql (crea/actualiza documentos_sfc si hace falta)
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f Ingest/SFC/schema.sql
+
+      - name: Ingesta SFC
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          COLECCION: ${{ github.event.inputs.coleccion }}
+          PAGINAS: ${{ github.event.inputs.paginas }}
+          PAUSA: ${{ github.event.inputs.pausa }}
+        run: |
+          python Ingest/SFC/ingest_pilot.py \
+            --coleccion "$COLECCION" \
+            --paginas "$PAGINAS" \
+            --pausa "$PAUSA"
+
+      - name: Resumen de motivo_sin_texto (diseño vs. fallo de extracción)
+        if: always()
+        run: |
+          psql "$DATABASE_URL" -c "
+            SELECT
+              tiene_texto_completo,
+              motivo_sin_texto,
+              count(*)
+            FROM documentos_sfc
+            GROUP BY 1, 2
+            ORDER BY 1 DESC, 3 DESC;
+          "

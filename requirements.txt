@@ -12,3 +12,4 @@ voyageai>=0.3
 playwright>=1.47
 beautifulsoup4>=4.12
 requests>=2.31
+pypdf>=5.0
