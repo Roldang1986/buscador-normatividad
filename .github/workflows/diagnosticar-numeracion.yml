@@ -105,10 +105,6 @@ on:
         description: "numero_articulo a imprimir completo con imprimir_articulo_url (ej. '2.2.1.1.2')"
         required: false
         default: ""
-      contar_fragmentos_urls:
-        description: "URL(s) base de documentos ya ingeridos a contar en la BD real, separadas por espacio. Solo lectura, no escribe nada — pensado para confirmar cuántos fragmentos quedaron persistidos tras cancelar una corrida a mitad de camino."
-        required: false
-        default: ""
 
 jobs:
   diagnostico:
@@ -130,7 +126,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' && github.event.inputs.borrar_fila_id == '' && github.event.inputs.imprimir_articulo_url == '' && github.event.inputs.contar_fragmentos_urls == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' && github.event.inputs.borrar_fila_id == '' && github.event.inputs.imprimir_articulo_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -248,10 +244,3 @@ jobs:
           URL_DOCUMENTO: ${{ github.event.inputs.imprimir_articulo_url }}
           NUMERO_ARTICULO: ${{ github.event.inputs.imprimir_articulo_numero }}
         run: python scripts/imprimir_articulo_completo.py "$URL_DOCUMENTO" "$NUMERO_ARTICULO"
-
-      - name: Contar fragmentos por URL (solo lectura, con BD)
-        if: ${{ github.event.inputs.contar_fragmentos_urls != '' }}
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          URLS: ${{ github.event.inputs.contar_fragmentos_urls }}
-        run: python scripts/contar_fragmentos_por_url.py $URLS

@@ -4,10 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: "URL del documento a verificar (ej. .../estatuto_tributario.htm)"
-        required: true
+        description: "URL del documento a verificar (ej. .../estatuto_tributario.htm). Requerido salvo que se use contar_fragmentos_urls."
+        required: false
+        default: ""
       articulo:
         description: "numero_articulo puntual a verificar (opcional, ej. 879)"
+        required: false
+        default: ""
+      contar_fragmentos_urls:
+        description: "Si se pasa, en vez de verificar cobertura corre contar_fragmentos_por_url.py: cuenta en la BD real cuántas filas existen para estas URL(s) base, separadas por espacio. Solo lectura, no escribe nada — pensado para confirmar cuántos fragmentos quedaron persistidos tras cancelar una corrida del scraper a mitad de camino."
         required: false
         default: ""
 
@@ -27,6 +32,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Verificar cobertura (solo lectura, sin Playwright)
+        if: ${{ github.event.inputs.contar_fragmentos_urls == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.url }}
@@ -37,3 +43,10 @@ jobs:
             ARGS+=(--articulo "$ARTICULO")
           fi
           python "${ARGS[@]}"
+
+      - name: Contar fragmentos por URL (solo lectura, con BD)
+        if: ${{ github.event.inputs.contar_fragmentos_urls != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URLS: ${{ github.event.inputs.contar_fragmentos_urls }}
+        run: python scripts/contar_fragmentos_por_url.py $URLS
