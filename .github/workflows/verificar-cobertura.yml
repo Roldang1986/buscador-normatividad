@@ -19,6 +19,14 @@ on:
         description: "Si se pasa, en vez de verificar cobertura corre diagnosticar_documento_ingerido.py sobre este documento YA ingerido: mide sobre lo almacenado en la BD si algún fragmento supera el umbral de dilución por longitud y muestra una muestra de numero_articulo reales (para confirmar formato de numeración). Solo lectura, no descarga nada de la fuente."
         required: false
         default: ""
+      diagnosticar_fragmentacion_url:
+        description: "Si se pasa (junto con diagnosticar_fragmentacion_articulos), corre diagnosticar_fragmentacion_multiple.py: descarga el documento real y reporta, para cada numero_articulo, cuántos fragmentos resultarían de fragmentar por numeral, el rango de longitud de cada fragmento, y si hay colisión de etiquetas de numeral duplicadas (mismo problema del caso 260-11). Solo reporte, no toca la BD ni aplica nada."
+        required: false
+        default: ""
+      diagnosticar_fragmentacion_articulos:
+        description: "numero_articulo(s) a diagnosticar con diagnosticar_fragmentacion_url, separados por espacio (ej. '5.2.4.3.1 2.31.3.1.2 2.6.12.1.2')"
+        required: false
+        default: ""
 
 jobs:
   verificar:
@@ -36,7 +44,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Verificar cobertura (solo lectura, sin Playwright)
-        if: ${{ github.event.inputs.contar_fragmentos_urls == '' && github.event.inputs.diagnosticar_documento_ingerido_url == '' }}
+        if: ${{ github.event.inputs.contar_fragmentos_urls == '' && github.event.inputs.diagnosticar_documento_ingerido_url == '' && github.event.inputs.diagnosticar_fragmentacion_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.url }}
@@ -61,3 +69,11 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.diagnosticar_documento_ingerido_url }}
         run: python scripts/diagnosticar_documento_ingerido.py "$URL_DOCUMENTO"
+
+      - name: Diagnosticar fragmentación por numeral en lote (solo reporte, sin BD)
+        if: ${{ github.event.inputs.diagnosticar_fragmentacion_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.diagnosticar_fragmentacion_url }}
+          ARTICULOS: ${{ github.event.inputs.diagnosticar_fragmentacion_articulos }}
+        run: python scripts/diagnosticar_fragmentacion_multiple.py "$URL_DOCUMENTO" $ARTICULOS
