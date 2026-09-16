@@ -27,6 +27,10 @@ on:
         description: "numero_articulo(s) a diagnosticar con diagnosticar_fragmentacion_url, separados por espacio (ej. '5.2.4.3.1 2.31.3.1.2 2.6.12.1.2')"
         required: false
         default: ""
+      contar_fragmentos_prefijo_exacto:
+        description: "Si se pasa, corre contar_fragmentos_por_prefijo_exacto.py: cuenta y lista las filas cuyo url_fuente empiece EXACTAMENTE con este prefijo, sin recortar en '#' (a diferencia de contar_fragmentos_urls). Útil para verificar un artículo puntual ya fragmentado, ej. '.../estatuto_tributario.htm#260-11'. Solo lectura."
+        required: false
+        default: ""
 
 jobs:
   verificar:
@@ -44,7 +48,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Verificar cobertura (solo lectura, sin Playwright)
-        if: ${{ github.event.inputs.contar_fragmentos_urls == '' && github.event.inputs.diagnosticar_documento_ingerido_url == '' && github.event.inputs.diagnosticar_fragmentacion_url == '' }}
+        if: ${{ github.event.inputs.contar_fragmentos_urls == '' && github.event.inputs.diagnosticar_documento_ingerido_url == '' && github.event.inputs.diagnosticar_fragmentacion_url == '' && github.event.inputs.contar_fragmentos_prefijo_exacto == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.url }}
@@ -77,3 +81,10 @@ jobs:
           URL_DOCUMENTO: ${{ github.event.inputs.diagnosticar_fragmentacion_url }}
           ARTICULOS: ${{ github.event.inputs.diagnosticar_fragmentacion_articulos }}
         run: python scripts/diagnosticar_fragmentacion_multiple.py "$URL_DOCUMENTO" $ARTICULOS
+
+      - name: Contar fragmentos por prefijo exacto (solo lectura, con BD)
+        if: ${{ github.event.inputs.contar_fragmentos_prefijo_exacto != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PREFIJO: ${{ github.event.inputs.contar_fragmentos_prefijo_exacto }}
+        run: python scripts/contar_fragmentos_por_prefijo_exacto.py "$PREFIJO"
