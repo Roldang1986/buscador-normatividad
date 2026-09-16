@@ -15,6 +15,10 @@ on:
         description: "Si se pasa, en vez de verificar cobertura corre contar_fragmentos_por_url.py: cuenta en la BD real cuántas filas existen para estas URL(s) base, separadas por espacio. Solo lectura, no escribe nada — pensado para confirmar cuántos fragmentos quedaron persistidos tras cancelar una corrida del scraper a mitad de camino."
         required: false
         default: ""
+      diagnosticar_documento_ingerido_url:
+        description: "Si se pasa, en vez de verificar cobertura corre diagnosticar_documento_ingerido.py sobre este documento YA ingerido: mide sobre lo almacenado en la BD si algún fragmento supera el umbral de dilución por longitud y muestra una muestra de numero_articulo reales (para confirmar formato de numeración). Solo lectura, no descarga nada de la fuente."
+        required: false
+        default: ""
 
 jobs:
   verificar:
@@ -32,7 +36,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Verificar cobertura (solo lectura, sin Playwright)
-        if: ${{ github.event.inputs.contar_fragmentos_urls == '' }}
+        if: ${{ github.event.inputs.contar_fragmentos_urls == '' && github.event.inputs.diagnosticar_documento_ingerido_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.url }}
@@ -50,3 +54,10 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.contar_fragmentos_urls }}
         run: python scripts/contar_fragmentos_por_url.py $URLS
+
+      - name: Diagnosticar documento ya ingerido (solo lectura, con BD)
+        if: ${{ github.event.inputs.diagnosticar_documento_ingerido_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.diagnosticar_documento_ingerido_url }}
+        run: python scripts/diagnosticar_documento_ingerido.py "$URL_DOCUMENTO"
