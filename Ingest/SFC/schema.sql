@@ -44,6 +44,24 @@ CREATE TABLE IF NOT EXISTS documentos_sfc (
     actualizado_en        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Migra tablas creadas con una versión anterior de este archivo (antes de
+-- otros_autores/motivo_sin_texto/fuente_atribucion/fecha_extraccion):
+-- CREATE TABLE IF NOT EXISTS no agrega columnas a una tabla que ya existe,
+-- así que sin este ALTER el archivo no es realmente idempotente en un
+-- entorno donde documentos_sfc ya existe de una corrida anterior (visto en
+-- producción: la corrida de prueba con `paginas=2` falló porque la tabla ya
+-- existía sin estas columnas y el CREATE INDEX de motivo_sin_texto más abajo
+-- reventó contra una columna inexistente).
+ALTER TABLE documentos_sfc ADD COLUMN IF NOT EXISTS otros_autores TEXT[];
+ALTER TABLE documentos_sfc ADD COLUMN IF NOT EXISTS motivo_sin_texto TEXT
+    CHECK (motivo_sin_texto IN (
+        'audio', 'sin_archivo', 'descarga_fallida',
+        'formato_no_reconocido', 'extraccion_fallida'
+    ));
+ALTER TABLE documentos_sfc ADD COLUMN IF NOT EXISTS fuente_atribucion TEXT NOT NULL
+    DEFAULT 'Fuente: Superintendencia Financiera de Colombia www.superfinanciera.gov.co';
+ALTER TABLE documentos_sfc ADD COLUMN IF NOT EXISTS fecha_extraccion TIMESTAMPTZ NOT NULL DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS idx_documentos_sfc_tipo ON documentos_sfc (tipo_documento);
 CREATE INDEX IF NOT EXISTS idx_documentos_sfc_materias ON documentos_sfc USING GIN (materias);
 -- Para monitorear volumen de fallos de extracción por motivo tras una
