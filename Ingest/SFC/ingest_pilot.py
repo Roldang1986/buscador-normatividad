@@ -67,52 +67,70 @@ INSERT_SQL = text(
 )
 
 
-def ingestar_pilotos(coleccion: str, max_paginas: int, pausa: float = 1.0) -> dict:
-    registros = raspar_coleccion(coleccion, max_paginas=max_paginas, dry_run=False, pausa=pausa)
-
+def ingestar_pilotos(
+    coleccion: str, max_paginas: int, pausa: float = 1.0, pagina_inicial: int = 1
+) -> dict:
+    """Embebe e inserta con **commit por página**, no una única transacción
+    para toda la colección: cada página raspada (~25 registros) se confirma
+    en Neon antes de pasar a la siguiente. Si el proceso se cancela o falla
+    a mitad de una corrida larga, lo ya confirmado queda en la base — solo
+    se pierde, como mucho, la página que estaba en curso — y la corrida se
+    puede retomar con `pagina_inicial` en vez de rasear/embeber todo de
+    nuevo (ver corrida cancelada en página 110, 2026-09-16, README).
+    """
+    raspados = 0
     insertados = 0
     omitidos_sin_texto = 0
     omitidos_duplicados = 0
 
-    with engine.begin() as conn:
-        for r in registros:
-            texto_embedding = _texto_para_embedding(r)
-            if not texto_embedding.strip():
-                omitidos_sin_texto += 1
-                continue
+    for pagina_num, registros_pagina in raspar_coleccion(
+        coleccion, max_paginas=max_paginas, dry_run=False, pausa=pausa, pagina_inicial=pagina_inicial
+    ):
+        raspados += len(registros_pagina)
+        with engine.begin() as conn:
+            for r in registros_pagina:
+                texto_embedding = _texto_para_embedding(r)
+                if not texto_embedding.strip():
+                    omitidos_sin_texto += 1
+                    continue
 
-            vector = embed_document(texto_embedding)
+                vector = embed_document(texto_embedding)
 
-            resultado = conn.execute(
-                INSERT_SQL,
-                {
-                    "tipo_documento": r["tipo_documento"],
-                    "numero_documento": r["numero_documento"],
-                    "fecha_texto": r["fecha_texto"],
-                    "expediente_radicado": r["expediente_radicado"],
-                    "autor_corporativo": r["autor_corporativo"],
-                    "titulo": r["titulo"],
-                    "documento_fuente": r["documento_fuente"],
-                    "resumen": r["resumen"],
-                    "notas": r["notas"],
-                    "materias": r["materias"],
-                    "otros_autores": r["otros_autores"],
-                    "url_archivo": r["url_archivo"],
-                    "tipo_archivo": r["tipo_archivo"],
-                    "tiene_texto_completo": r["tiene_texto_completo"],
-                    "texto_completo": r.get("texto_completo"),
-                    "motivo_sin_texto": r.get("motivo_sin_texto"),
-                    "fuente_atribucion": FUENTE_ATRIBUCION,
-                    "embedding": "[" + ",".join(repr(x) for x in vector) + "]",
-                },
-            )
-            if resultado.fetchone() is not None:
-                insertados += 1
-            else:
-                omitidos_duplicados += 1
+                resultado = conn.execute(
+                    INSERT_SQL,
+                    {
+                        "tipo_documento": r["tipo_documento"],
+                        "numero_documento": r["numero_documento"],
+                        "fecha_texto": r["fecha_texto"],
+                        "expediente_radicado": r["expediente_radicado"],
+                        "autor_corporativo": r["autor_corporativo"],
+                        "titulo": r["titulo"],
+                        "documento_fuente": r["documento_fuente"],
+                        "resumen": r["resumen"],
+                        "notas": r["notas"],
+                        "materias": r["materias"],
+                        "otros_autores": r["otros_autores"],
+                        "url_archivo": r["url_archivo"],
+                        "tipo_archivo": r["tipo_archivo"],
+                        "tiene_texto_completo": r["tiene_texto_completo"],
+                        "texto_completo": r.get("texto_completo"),
+                        "motivo_sin_texto": r.get("motivo_sin_texto"),
+                        "fuente_atribucion": FUENTE_ATRIBUCION,
+                        "embedding": "[" + ",".join(repr(x) for x in vector) + "]",
+                    },
+                )
+                if resultado.fetchone() is not None:
+                    insertados += 1
+                else:
+                    omitidos_duplicados += 1
+        print(
+            f"  página {pagina_num}: commit OK "
+            f"(acumulado: {insertados} insertados, {omitidos_duplicados} duplicados, "
+            f"{omitidos_sin_texto} sin texto para embedding)"
+        )
 
     return {
-        "raspados": len(registros),
+        "raspados": raspados,
         "insertados": insertados,
         "omitidos_sin_texto_para_embedding": omitidos_sin_texto,
         "omitidos_duplicados": omitidos_duplicados,
@@ -126,7 +144,13 @@ if __name__ == "__main__":
     ap.add_argument("--coleccion", default="ac")
     ap.add_argument("--paginas", type=int, default=1)
     ap.add_argument("--pausa", type=float, default=1.0)
+    ap.add_argument(
+        "--pagina-inicial",
+        type=int,
+        default=1,
+        help="Página (1-based) por la que empezar, para retomar una corrida cancelada/fallida.",
+    )
     args = ap.parse_args()
 
-    resumen = ingestar_pilotos(args.coleccion, args.paginas, args.pausa)
+    resumen = ingestar_pilotos(args.coleccion, args.paginas, args.pausa, args.pagina_inicial)
     print(resumen)

@@ -111,15 +111,50 @@ Confirmar esto contra el entorno de despliegue real antes de escalar.
   `fuente_atribucion` en `schema.sql`/`ingest_pilot.py` **tenía el prefijo
   "Fuente: " faltante** respecto a la cita exigida — corregido.
 
+## Corrida real cancelada en página 110 (2026-09-16, run 35153542138)
+
+Se lanzó la ingesta completa de `ac` (138 páginas) vía `scraper-sfc.yml` y
+se canceló manualmente tras llegar a la página 111 (~2.775 registros
+raspados). Verificado post-mortem contra Neon y el log del run:
+
+- **`documentos_sfc` sigue en 100 registros**, todos con `embedding` no
+  nulo y `texto_completo` completo — cero registros nulos o a medias.
+  Esos 100 son de una corrida piloto local anterior (`creado_en` entre
+  15:38:31 y 15:39:53 UTC), **no** de esta corrida cancelada: en ese
+  momento `ingest_pilot.py` envolvía el loop completo de embed+insert de
+  *todas* las páginas raspadas en una sola transacción
+  (`with engine.begin() as conn:`), así que cancelar el job a mitad de
+  camino hacía rollback atómico — no podía quedar un insert parcial ni un
+  embedding nulo, pero tampoco quedaba nada del progreso raspado. **Fix
+  aplicado (2026-09-16):** `raspar_coleccion` ahora es un generador que
+  yieldea página por página, y `ingestar_pilotos` hace `engine.begin()` +
+  commit por página en vez de para toda la corrida — una cancelación
+  tardía pierde como mucho una página (~25 registros), no horas de
+  trabajo. Además se agregó `--pagina-inicial` (y el input
+  `pagina_inicial` en `scraper-sfc.yml`) para retomar una corrida desde
+  la página siguiente a la última confirmada, sin volver a
+  rasear/descargar/embeber lo ya insertado. La última página confirmada
+  se identifica por la línea `página N: commit OK` en el log de la
+  corrida anterior.
+- **`antiword` confirmado funcionando en ejecución real**, no solo
+  instalado: `scraper.py` chequea `shutil.which("antiword")` en tiempo de
+  ejecución y loggea si falta — ese warning no apareció en el log; y de
+  los ~2.775 registros procesados (incluyendo años `doc_ole`) hubo cero
+  líneas de `extraccion_fallida`, solo 13 fallos de descarga (500/502/404/
+  DNS, capa de red, no de extracción). El punto de "confirmar antiword"
+  del Pendiente pasa de "el paso de instalación existe en el yml" a
+  "confirmado en una corrida real".
+
 ## Pendiente antes de escalar a las ~750 páginas totales
 
 - Decidir throttling final (`--pausa`, por defecto 1s/página) para no
   saturar el sitio en una corrida de producción.
-- Confirmar que `antiword` esté disponible en el entorno de producción
-  (ver nota de dependencia arriba) o aceptar la degradación silenciosa
-  para `doc_ole`.
 - Extender el censo de formatos a `af`/`aj` (por ahora solo se censó
   `ac`) antes de ingerir texto completo de esas dos colecciones.
+- Relanzar la ingesta completa de `ac` (la corrida del 2026-09-16 se
+  canceló en página 110/138 y no dejó nada persistido, ver sección
+  arriba — con el commit por página ya no debería volver a pasar, pero
+  la corrida en sí sigue pendiente de correr completa).
 
 ## Cómo seguir
 

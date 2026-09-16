@@ -24,6 +24,10 @@ on:
         description: "Segundos de espera entre páginas (throttling contra el sitio real)"
         required: false
         default: "1.0"
+      pagina_inicial:
+        description: "Página (1-based) por la que empezar. Usar para retomar una corrida cancelada/fallida sin volver a rasear/embeber las páginas ya confirmadas (ver 'commit OK' en el log de la corrida anterior para saber la última página confirmada)."
+        required: false
+        default: "1"
 
 jobs:
   ingesta:
@@ -54,11 +58,13 @@ jobs:
           COLECCION: ${{ github.event.inputs.coleccion }}
           PAGINAS: ${{ github.event.inputs.paginas }}
           PAUSA: ${{ github.event.inputs.pausa }}
+          PAGINA_INICIAL: ${{ github.event.inputs.pagina_inicial }}
         run: |
           python Ingest/SFC/ingest_pilot.py \
             --coleccion "$COLECCION" \
             --paginas "$PAGINAS" \
-            --pausa "$PAUSA"
+            --pausa "$PAUSA" \
+            --pagina-inicial "$PAGINA_INICIAL"
 
       - name: Resumen de motivo_sin_texto (diseño vs. fallo de extracción)
         if: always()
