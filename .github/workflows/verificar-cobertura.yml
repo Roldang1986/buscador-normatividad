@@ -4,10 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: "URL del documento a verificar (ej. .../estatuto_tributario.htm)"
-        required: true
+        description: "URL del documento a verificar (ej. .../estatuto_tributario.htm). Requerido salvo que se use contar_fragmentos_urls."
+        required: false
+        default: ""
       articulo:
         description: "numero_articulo puntual a verificar (opcional, ej. 879)"
+        required: false
+        default: ""
+      contar_fragmentos_urls:
+        description: "Si se pasa, en vez de verificar cobertura corre contar_fragmentos_por_url.py: cuenta en la BD real cuántas filas existen para estas URL(s) base, separadas por espacio. Solo lectura, no escribe nada — pensado para confirmar cuántos fragmentos quedaron persistidos tras cancelar una corrida del scraper a mitad de camino."
+        required: false
+        default: ""
+      diagnosticar_documento_ingerido_url:
+        description: "Si se pasa, en vez de verificar cobertura corre diagnosticar_documento_ingerido.py sobre este documento YA ingerido: mide sobre lo almacenado en la BD si algún fragmento supera el umbral de dilución por longitud y muestra una muestra de numero_articulo reales (para confirmar formato de numeración). Solo lectura, no descarga nada de la fuente."
+        required: false
+        default: ""
+      diagnosticar_fragmentacion_url:
+        description: "Si se pasa (junto con diagnosticar_fragmentacion_articulos), corre diagnosticar_fragmentacion_multiple.py: descarga el documento real y reporta, para cada numero_articulo, cuántos fragmentos resultarían de fragmentar por numeral, el rango de longitud de cada fragmento, y si hay colisión de etiquetas de numeral duplicadas (mismo problema del caso 260-11). Solo reporte, no toca la BD ni aplica nada."
+        required: false
+        default: ""
+      diagnosticar_fragmentacion_articulos:
+        description: "numero_articulo(s) a diagnosticar con diagnosticar_fragmentacion_url, separados por espacio (ej. '5.2.4.3.1 2.31.3.1.2 2.6.12.1.2')"
+        required: false
+        default: ""
+      contar_fragmentos_prefijo_exacto:
+        description: "Si se pasa, corre contar_fragmentos_por_prefijo_exacto.py: cuenta y lista las filas cuyo url_fuente empiece EXACTAMENTE con este prefijo, sin recortar en '#' (a diferencia de contar_fragmentos_urls). Útil para verificar un artículo puntual ya fragmentado, ej. '.../estatuto_tributario.htm#260-11'. Solo lectura."
         required: false
         default: ""
 
@@ -27,6 +48,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Verificar cobertura (solo lectura, sin Playwright)
+        if: ${{ github.event.inputs.contar_fragmentos_urls == '' && github.event.inputs.diagnosticar_documento_ingerido_url == '' && github.event.inputs.diagnosticar_fragmentacion_url == '' && github.event.inputs.contar_fragmentos_prefijo_exacto == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.url }}
@@ -37,3 +59,32 @@ jobs:
             ARGS+=(--articulo "$ARTICULO")
           fi
           python "${ARGS[@]}"
+
+      - name: Contar fragmentos por URL (solo lectura, con BD)
+        if: ${{ github.event.inputs.contar_fragmentos_urls != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URLS: ${{ github.event.inputs.contar_fragmentos_urls }}
+        run: python scripts/contar_fragmentos_por_url.py $URLS
+
+      - name: Diagnosticar documento ya ingerido (solo lectura, con BD)
+        if: ${{ github.event.inputs.diagnosticar_documento_ingerido_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.diagnosticar_documento_ingerido_url }}
+        run: python scripts/diagnosticar_documento_ingerido.py "$URL_DOCUMENTO"
+
+      - name: Diagnosticar fragmentación por numeral en lote (solo reporte, sin BD)
+        if: ${{ github.event.inputs.diagnosticar_fragmentacion_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.diagnosticar_fragmentacion_url }}
+          ARTICULOS: ${{ github.event.inputs.diagnosticar_fragmentacion_articulos }}
+        run: python scripts/diagnosticar_fragmentacion_multiple.py "$URL_DOCUMENTO" $ARTICULOS
+
+      - name: Contar fragmentos por prefijo exacto (solo lectura, con BD)
+        if: ${{ github.event.inputs.contar_fragmentos_prefijo_exacto != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PREFIJO: ${{ github.event.inputs.contar_fragmentos_prefijo_exacto }}
+        run: python scripts/contar_fragmentos_por_prefijo_exacto.py "$PREFIJO"

@@ -97,6 +97,14 @@ on:
         description: "texto esperado de la fila a borrar con borrar_fila_id (verificación de seguridad)"
         required: false
         default: ""
+      imprimir_articulo_url:
+        description: "Si se pasa (junto con imprimir_articulo_numero), descarga el documento e imprime el texto completo de ese numero_articulo, sin truncar. Solo lectura, sin BD."
+        required: false
+        default: ""
+      imprimir_articulo_numero:
+        description: "numero_articulo a imprimir completo con imprimir_articulo_url (ej. '2.2.1.1.2')"
+        required: false
+        default: ""
 
 jobs:
   diagnostico:
@@ -118,7 +126,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' && github.event.inputs.borrar_fila_id == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' && github.event.inputs.borrar_fila_id == '' && github.event.inputs.imprimir_articulo_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -228,3 +236,11 @@ jobs:
           TIPO_NORMA_ESPERADO: ${{ github.event.inputs.borrar_fila_tipo_norma_esperado }}
           TEXTO_ESPERADO: ${{ github.event.inputs.borrar_fila_texto_esperado }}
         run: python scripts/borrar_fila_por_id.py "$FILA_ID" "$TIPO_NORMA_ESPERADO" "$TEXTO_ESPERADO"
+
+      - name: Imprimir artículo completo (solo reporte, sin BD)
+        if: ${{ github.event.inputs.imprimir_articulo_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.imprimir_articulo_url }}
+          NUMERO_ARTICULO: ${{ github.event.inputs.imprimir_articulo_numero }}
+        run: python scripts/imprimir_articulo_completo.py "$URL_DOCUMENTO" "$NUMERO_ARTICULO"

@@ -282,6 +282,15 @@ PARAGRAFO_HEADER_RE = re.compile(
     r"(?mi)^\s*(PAR[ÁA]GRAFO(?:\s+[0-9]+o?)?)\.?\s*(?=[<A-ZÁÉÍÓÚÑ])"
 )
 
+# Delimitador de SUB-BLOQUE (namespace) dentro de un artículo — NO es un
+# fragmento en sí mismo, solo abre un contexto nuevo para los numerales
+# que le siguen. Confirmado con el texto real de 260-11: "A." y "B." van
+# solos en su propia línea (la letra + punto, nada más), con el título
+# del sub-bloque en la línea siguiente ("A. \nDocumentación
+# comprobatoria"). Ver _fragmentar_articulo_por_numeral() para el
+# desambiguador que usa esto.
+LITERAL_HEADER_RE = re.compile(r"(?m)^[ \t]*([A-Z])\.[ \t]*$")
+
 # Fragmentar solo si el artículo es largo Y tiene numerales suficientes
 # para que partirlo tenga sentido natural — ver el análisis de por qué
 # es un AND y no un OR en la propuesta de diseño (un artículo largo sin
@@ -294,20 +303,34 @@ UMBRAL_NUMERALES_FRAGMENTACION = 10
 
 # Allowlist manual de artículos donde ingestar_documento() aplica de
 # verdad la fragmentación por numeral — deliberadamente NO es "todo
-# artículo que califique por umbral". De los 6 artículos de alto riesgo
-# analizados (879, 424, 477, 468-1, 260-11, 260-3), solo 879 y 477
-# resultaron casos limpios en el dry-run de scripts/prototipo_fragmentacion_numeral.py:
+# artículo que califique por umbral". De los 9 artículos de alto riesgo
+# analizados hasta ahora (879, 424, 477, 468-1, 260-11, 260-3, y del
+# Decreto 2555 de 2010: 5.2.4.3.1, 2.31.3.1.2, 2.6.12.1.2):
+# - 879, 477: casos limpios (dry-run de scripts/prototipo_fragmentacion_numeral.py).
+# - 260-11, 2.31.3.1.2, 2.6.12.1.2: tenían colisión de etiquetas (mismo
+#   numeral reaparece en sub-bloques independientes — literales "A."/"B."
+#   en 260-11, PARÁGRAFOs en los dos del Decreto 2555) — resuelto con el
+#   desambiguador de namespace de _fragmentar_articulo_por_numeral() (ver
+#   LITERAL_HEADER_RE y _normalizar_etiqueta_paragrafo()): el numeral se
+#   prefija con su sub-bloque ("A.1", "PARAGRAFO2.3"), sin colisiones.
 # - 424: sus numerales son en sí mismos listas arancelarias enormes — la
 #   fragmentación no resuelve su dilución (fragmentos igual de grandes).
-# - 260-11: tiene DOS listas numeradas independientes bajo literales
-#   "A."/"B." (etiquetas de numeral repetidas) — pendiente desambiguador
-#   de namespace por literal (ver LITERAL_HEADER_RE, no implementado
-#   todavía).
 # - 468-1: parágrafos duplicados sin numerar de forma distinguible.
 # - 260-3: no calificó para fragmentar (no cumple ambos umbrales).
+# - 5.2.4.3.1 (Decreto 2555): NO incluido todavía — su numeración real es
+#   decimal de dos niveles ("1.1", "3.2", "5.10") que NUMERAL_HEADER_RE no
+#   detecta en absoluto (solo ve los 8 numerales de primer nivel, cada
+#   uno grande); necesita un regex de sub-numeral decimal aparte, pendiente
+#   como tarea separada.
 # Agregar un artículo aquí solo tras confirmar con ese mismo dry-run que
 # no tiene ninguno de estos problemas.
-ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {"879", "477"}
+ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {
+    "879",
+    "477",
+    "260-11",
+    "2.31.3.1.2",
+    "2.6.12.1.2",
+}
 
 
 def _detectar_numerales(texto_articulo: str) -> list[re.Match]:
@@ -326,6 +349,16 @@ def _debe_fragmentarse_por_numeral(texto_articulo: str) -> bool:
     )
 
 
+def _normalizar_etiqueta_paragrafo(etiqueta_cruda: str) -> str:
+    """'PARÁGRAFO' (sin número — la convención legal para "el primer
+    parágrafo" cuando hay varios) -> 'PARAGRAFO1'. 'PARÁGRAFO 2o' ->
+    'PARAGRAFO2'. Usado como namespace para los numerales que sigan a un
+    parágrafo (ver _fragmentar_articulo_por_numeral)."""
+    m = re.search(r"[0-9]+", etiqueta_cruda)
+    numero = m.group(0) if m else "1"
+    return f"PARAGRAFO{numero}"
+
+
 def _fragmentar_articulo_por_numeral(texto_articulo: str) -> list[tuple[str | None, str]]:
     """Si texto_articulo cumple _debe_fragmentarse_por_numeral, lo divide
     en (etiqueta_numeral, texto_del_numeral) — cada fragmento lleva el
@@ -333,22 +366,47 @@ def _fragmentar_articulo_por_numeral(texto_articulo: str) -> list[tuple[str | No
     numeral) prefijado, para que conserve contexto temático propio y no
     dependa de que el agente vea también el artículo completo.
 
+    Desambiguador de namespace (confirmado con el texto real de 260-11 y
+    de 2.31.3.1.2/2.6.12.1.2 del Decreto 2555): recorre también
+    LITERAL_HEADER_RE (literales "A."/"B.") y usa PARAGRAFO_HEADER_RE
+    como delimitador DOBLE — un parágrafo sigue siendo un fragmento en sí
+    mismo, pero además abre su propio namespace para los numerales que le
+    sigan. Un literal, en cambio, nunca genera fragmento propio, solo
+    abre namespace. El numeral se etiqueta con su namespace activo
+    (ej. "A.1", "PARAGRAFO2.3") si hay alguno; si no, como antes ("1").
+
     Si NO cumple el criterio, devuelve [(None, texto_articulo)] sin
     cambios — misma forma de retorno en ambos casos para uso uniforme
     por el llamador (ver _extraer_articulos, incluso formato)."""
     if not _debe_fragmentarse_por_numeral(texto_articulo):
         return [(None, texto_articulo)]
 
-    matches = _detectar_numerales(texto_articulo)
-    preambulo = texto_articulo[: matches[0].start()].strip()
+    delimitadores = sorted(
+        [("numeral", m.start(), m.group(1).strip()) for m in NUMERAL_HEADER_RE.finditer(texto_articulo)]
+        + [("paragrafo", m.start(), m.group(1).strip()) for m in PARAGRAFO_HEADER_RE.finditer(texto_articulo)]
+        + [("literal", m.start(), m.group(1).strip()) for m in LITERAL_HEADER_RE.finditer(texto_articulo)],
+        key=lambda t: t[1],
+    )
+    preambulo = texto_articulo[: delimitadores[0][1]].strip()
 
     fragmentos: list[tuple[str | None, str]] = []
-    for i, m in enumerate(matches):
-        inicio = m.start()
-        fin = matches[i + 1].start() if i + 1 < len(matches) else len(texto_articulo)
-        etiqueta = m.group(1).strip()
-        cuerpo_numeral = texto_articulo[inicio:fin].strip()
-        texto_fragmento = f"{preambulo}\n\n{cuerpo_numeral}" if preambulo else cuerpo_numeral
+    prefijo_activo: str | None = None
+    for i, (tipo, inicio, etiqueta_cruda) in enumerate(delimitadores):
+        fin = delimitadores[i + 1][1] if i + 1 < len(delimitadores) else len(texto_articulo)
+        cuerpo = texto_articulo[inicio:fin].strip()
+
+        if tipo == "literal":
+            prefijo_activo = etiqueta_cruda
+            continue
+
+        if tipo == "paragrafo":
+            texto_fragmento = f"{preambulo}\n\n{cuerpo}" if preambulo else cuerpo
+            fragmentos.append((etiqueta_cruda, texto_fragmento))
+            prefijo_activo = _normalizar_etiqueta_paragrafo(etiqueta_cruda)
+            continue
+
+        etiqueta = f"{prefijo_activo}.{etiqueta_cruda}" if prefijo_activo else etiqueta_cruda
+        texto_fragmento = f"{preambulo}\n\n{cuerpo}" if preambulo else cuerpo
         fragmentos.append((etiqueta, texto_fragmento))
     return fragmentos
 
