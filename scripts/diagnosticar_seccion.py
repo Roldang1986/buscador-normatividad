@@ -15,6 +15,14 @@ Reporta, por documento:
 - Artículos que superan el umbral de dilución por longitud (>=26,627
   caracteres, el tamaño del art. 879 antes de fragmentarlo) y/o que ya
   calificarían para _debe_fragmentarse_por_numeral().
+- Sub-numerales decimales tipo "N.N" (ej. "1.10", "5.2") — patrón
+  confirmado en 5.2.4.3.1 y en las listas anidadas de 2.31.3.1.2 y
+  2.6.12.1.2 (Decreto 2555 de 2010) que NUMERAL_HEADER_RE no detecta en
+  absoluto. Su presencia es señal de que, si el artículo también supera
+  el umbral de dilución, la fragmentación por numeral actual no lo
+  resolvería bien (o de que su ausencia de calificación puede deberse a
+  que el detector es ciego a su numeración real, no a que el artículo
+  no tenga estructura).
 
 Uso:
     python scripts/diagnosticar_seccion.py "1.2. Otras leyes con contenido tributario" --limite 5
@@ -47,6 +55,13 @@ PALABRAS_VIGENCIA_RE = re.compile(
     r"\b(derogad[oa]|modificad[oa]|adicionad[oa]|subrogad[oa]|inexequible|inconstitucional)\b",
     re.IGNORECASE,
 )
+
+# Sub-numeral decimal ("1.10 Inversiones...", "5.2 Cambios...") — mismo
+# hueco confirmado de NUMERAL_HEADER_RE en 5.2.4.3.1/2.31.3.1.2/2.6.12.1.2
+# del Decreto 2555 de 2010 (ver ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA
+# en app/ingest/dian_scraper.py). Solo diagnóstico, no se usa para
+# fragmentar todavía.
+SUBNUMERAL_DECIMAL_RE = re.compile(r"(?m)^\s*([0-9]{1,2}\.[0-9]{1,2})\s+(?=[<A-ZÁÉÍÓÚÑ])")
 
 
 def _posibles_notas_no_capturadas(texto_articulo: str) -> list[str]:
@@ -105,7 +120,8 @@ def main() -> None:
 
             longitud = len(texto_articulo)
             califica_fragmentacion = _debe_fragmentarse_por_numeral(texto_articulo)
-            if longitud >= UMBRAL_LONGITUD_DILUCION or califica_fragmentacion:
+            subnumerales_decimales = sorted(set(SUBNUMERAL_DECIMAL_RE.findall(texto_articulo)))
+            if longitud >= UMBRAL_LONGITUD_DILUCION or califica_fragmentacion or subnumerales_decimales:
                 articulos_sobre_umbral.append(
                     {
                         "numero_articulo": numero,
@@ -113,6 +129,8 @@ def main() -> None:
                         "supera_26627": longitud >= UMBRAL_LONGITUD_DILUCION,
                         "calificaria_fragmentacion_por_numeral": califica_fragmentacion,
                         "numerales_detectados": len(_detectar_numerales(texto_articulo)),
+                        "tiene_subnumerales_decimales": bool(subnumerales_decimales),
+                        "subnumerales_decimales_detectados": subnumerales_decimales,
                     }
                 )
 
