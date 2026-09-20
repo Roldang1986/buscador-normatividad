@@ -40,3 +40,31 @@ class FuenteCitada(BaseModel):
 class ConsultaResponse(BaseModel):
     respuesta: str
     fuentes: list[FuenteCitada]
+
+
+class DocumentoSFCRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tipo_documento: str
+    numero_documento: str | None = None
+    fecha_texto: str | None = None
+    titulo: str | None = None
+    resumen: str | None = None
+    texto_completo: str | None = None
+    url_archivo: str | None = None
+    fuente_atribucion: str
+
+
+class FuenteCitadaSFC(BaseModel):
+    id: int
+    tipo_documento: str
+    numero_documento: str | None = None
+    fecha_texto: str | None = None
+    titulo: str | None = None
+    fuente_atribucion: str
+
+
+class ConsultaSFCResponse(BaseModel):
+    respuesta: str
+    fuentes: list[FuenteCitadaSFC]

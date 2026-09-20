@@ -1,6 +1,6 @@
 import TarjetaFuente from "./TarjetaFuente";
 
-export default function Respuesta({ resultado, onVerTextoCompleto }) {
+export default function Respuesta({ resultado, corpus = "tributario", onVerTextoCompleto }) {
   if (!resultado) return null;
 
   return (
@@ -14,6 +14,7 @@ export default function Respuesta({ resultado, onVerTextoCompleto }) {
               <TarjetaFuente
                 key={fuente.id}
                 fuente={fuente}
+                corpus={corpus}
                 onVerTextoCompleto={onVerTextoCompleto}
               />
             ))}

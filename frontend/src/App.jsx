@@ -3,15 +3,17 @@ import CajaPregunta from "./components/CajaPregunta";
 import Respuesta from "./components/Respuesta";
 import ModalTexto from "./components/ModalTexto";
 import Historial from "./components/Historial";
-import { consultarPregunta } from "./api";
+import SelectorCorpus from "./components/SelectorCorpus";
+import { consultarPregunta, consultarPreguntaSFC } from "./api";
 import { useHistorial } from "./useHistorial";
 import "./App.css";
 
 export default function App() {
+  const [corpus, setCorpus] = useState("tributario");
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
   const [resultado, setResultado] = useState(null);
-  const [normaIdModal, setNormaIdModal] = useState(null);
+  const [documentoIdModal, setDocumentoIdModal] = useState(null);
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const { historial, agregar, borrar } = useHistorial();
 
@@ -19,9 +21,10 @@ export default function App() {
     setCargando(true);
     setError(null);
     try {
-      const datos = await consultarPregunta(pregunta);
+      const datos =
+        corpus === "sfc" ? await consultarPreguntaSFC(pregunta) : await consultarPregunta(pregunta);
       setResultado(datos);
-      agregar(pregunta, datos);
+      agregar(pregunta, datos, corpus);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -30,8 +33,15 @@ export default function App() {
   }
 
   function manejarSeleccionHistorial(entrada) {
+    setCorpus(entrada.corpus || "tributario");
     setResultado(entrada.resultado);
     setHistorialAbierto(false);
+  }
+
+  function manejarCambioCorpus(nuevoCorpus) {
+    setCorpus(nuevoCorpus);
+    setResultado(null);
+    setError(null);
   }
 
   return (
@@ -44,10 +54,11 @@ export default function App() {
       </header>
 
       <main className="app__principal">
+        <SelectorCorpus corpus={corpus} onCambiar={manejarCambioCorpus} disabled={cargando} />
         <CajaPregunta onEnviar={manejarConsulta} cargando={cargando} />
         {error && <p className="app__error">{error}</p>}
         {cargando && <p className="app__cargando">Buscando en la normatividad…</p>}
-        <Respuesta resultado={resultado} onVerTextoCompleto={setNormaIdModal} />
+        <Respuesta resultado={resultado} corpus={corpus} onVerTextoCompleto={setDocumentoIdModal} />
       </main>
 
       <Historial
@@ -58,8 +69,12 @@ export default function App() {
         onCerrar={() => setHistorialAbierto(false)}
       />
 
-      {normaIdModal !== null && (
-        <ModalTexto normaId={normaIdModal} onCerrar={() => setNormaIdModal(null)} />
+      {documentoIdModal !== null && (
+        <ModalTexto
+          documentoId={documentoIdModal}
+          corpus={corpus}
+          onCerrar={() => setDocumentoIdModal(null)}
+        />
       )}
     </div>
   );

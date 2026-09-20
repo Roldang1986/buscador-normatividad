@@ -18,6 +18,27 @@
   color: #b00020;
 }
 
+.selector-corpus {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.selector-corpus__boton {
+  font: inherit;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #ccc;
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.selector-corpus__boton--activo {
+  background: #222;
+  color: #fff;
+  border-color: #222;
+}
+
 .caja-pregunta {
   display: flex;
   flex-direction: column;

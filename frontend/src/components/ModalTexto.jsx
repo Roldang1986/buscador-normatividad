@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { obtenerNormaCompleta } from "../api";
+import { obtenerDocumentoSFCCompleto, obtenerNormaCompleta } from "../api";
 
-export default function ModalTexto({ normaId, onCerrar }) {
-  const [norma, setNorma] = useState(null);
+export default function ModalTexto({ documentoId, corpus = "tributario", onCerrar }) {
+  const [documento, setDocumento] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
 
@@ -10,11 +10,13 @@ export default function ModalTexto({ normaId, onCerrar }) {
     let cancelado = false;
     setCargando(true);
     setError(null);
-    setNorma(null);
+    setDocumento(null);
 
-    obtenerNormaCompleta(normaId)
+    const obtener = corpus === "sfc" ? obtenerDocumentoSFCCompleto : obtenerNormaCompleta;
+
+    obtener(documentoId)
       .then((datos) => {
-        if (!cancelado) setNorma(datos);
+        if (!cancelado) setDocumento(datos);
       })
       .catch((err) => {
         if (!cancelado) setError(err.message);
@@ -26,7 +28,7 @@ export default function ModalTexto({ normaId, onCerrar }) {
     return () => {
       cancelado = true;
     };
-  }, [normaId]);
+  }, [documentoId, corpus]);
 
   return (
     <div className="modal-fondo" onClick={onCerrar}>
@@ -36,14 +38,27 @@ export default function ModalTexto({ normaId, onCerrar }) {
         </button>
         {cargando && <p>Cargando texto completo…</p>}
         {error && <p className="modal-error">{error}</p>}
-        {norma && (
+        {documento && corpus === "sfc" && (
           <>
-            <h3>{norma.fuente}</h3>
+            <h3>{documento.titulo || `Concepto ${documento.numero_documento || ""}`}</h3>
             <p className="modal-meta">
-              Estado: {norma.estado_vigencia}
-              {norma.nota_vigencia ? ` — ${norma.nota_vigencia}` : ""}
+              {documento.tipo_documento}
+              {documento.fecha_texto ? ` — ${documento.fecha_texto}` : ""}
             </p>
-            <pre className="modal-texto">{norma.texto}</pre>
+            <pre className="modal-texto">
+              {documento.texto_completo || documento.resumen || "Sin texto completo disponible."}
+            </pre>
+            <p className="modal-meta">{documento.fuente_atribucion}</p>
+          </>
+        )}
+        {documento && corpus !== "sfc" && (
+          <>
+            <h3>{documento.fuente}</h3>
+            <p className="modal-meta">
+              Estado: {documento.estado_vigencia}
+              {documento.nota_vigencia ? ` — ${documento.nota_vigencia}` : ""}
+            </p>
+            <pre className="modal-texto">{documento.texto}</pre>
           </>
         )}
       </div>
