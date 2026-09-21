@@ -324,6 +324,19 @@ UMBRAL_NUMERALES_FRAGMENTACION = 10
 #   como tarea separada.
 # Agregar un artículo aquí solo tras confirmar con ese mismo dry-run que
 # no tiene ninguno de estos problemas.
+#
+# BACKLOG (sin diseñar, solo señalado): esta allowlist está indexada por
+# numero_articulo, lo que asume que todo documento se divide en artículos.
+# Las Circulares de la DIAN (sección 1.9) no usan encabezados "ARTÍCULO N."
+# — el documento entero cae en un solo fragmento con numero_articulo=None,
+# aunque internamente sí tenga numerales simples que _debe_fragmentarse_por_numeral()
+# reconocería (ej. Circular 3/2026: 32 numerales detectados). Es un tercer
+# tipo de hueco, distinto del namespace de literales/PARÁGRAFO (260-11) y
+# de los sub-numerales decimales (Decreto 2555) de arriba: acá no falta un
+# regex, falta que el mecanismo de fragmentación pueda aplicarse sin un
+# numero_articulo. No se ingirió ningún documento de 1.9 por encima del
+# umbral de dilución individualmente, así que no bloquea nada hoy — queda
+# para revisión futura si el uso real lo justifica.
 ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {
     "879",
     "477",
