@@ -8,10 +8,21 @@ dos listas independientes bajo literales "A."/"B." que reutilizaban la
 misma numeración "1.", "2." — eso produciría etiquetas duplicadas si se
 fragmentara tal cual).
 
+Si se llama SIN ningún numero_articulo (solo la URL), diagnostica el
+DOCUMENTO COMPLETO como un solo "artículo" (numero_articulo=None) —
+modo agregado para la extensión de fragmentación por numeral a
+documentos sin encabezados "ARTÍCULO N." (ver
+DOCUMENTOS_SIN_ARTICULO_CON_FRAGMENTACION_NUMERAL_HABILITADA en
+app/ingest/dian_scraper.py, confirmado con la sección "1.8. Orden
+administrativa"): _fragmentar_articulo_por_numeral() es agnóstica a si
+el texto que recibe es un artículo o el documento entero, así que no
+hace falta lógica nueva, solo permitir el caso numero_articulo=None.
+
 No modifica la BD. No aplica nada — solo reporta.
 
 Uso:
-    python scripts/diagnosticar_fragmentacion_multiple.py <url_documento> <numero_articulo> [numero_articulo ...]
+    python scripts/diagnosticar_fragmentacion_multiple.py <url_documento> [numero_articulo ...]
+    (sin numero_articulo = diagnostica el documento completo)
 """
 
 import json
@@ -32,12 +43,12 @@ from app.ingest.dian_scraper import (
 
 
 def main() -> None:
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
 
     url_base = sys.argv[1].split("#")[0]
-    articulos_objetivo = sys.argv[2:]
+    articulos_objetivo = sys.argv[2:] or [None]
 
     html = descargar_html(url_base)
     texto = _texto_plano(html)

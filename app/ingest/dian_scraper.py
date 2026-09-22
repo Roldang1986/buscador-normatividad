@@ -324,19 +324,6 @@ UMBRAL_NUMERALES_FRAGMENTACION = 10
 #   como tarea separada.
 # Agregar un artículo aquí solo tras confirmar con ese mismo dry-run que
 # no tiene ninguno de estos problemas.
-#
-# BACKLOG (sin diseñar, solo señalado): esta allowlist está indexada por
-# numero_articulo, lo que asume que todo documento se divide en artículos.
-# Las Circulares de la DIAN (sección 1.9) no usan encabezados "ARTÍCULO N."
-# — el documento entero cae en un solo fragmento con numero_articulo=None,
-# aunque internamente sí tenga numerales simples que _debe_fragmentarse_por_numeral()
-# reconocería (ej. Circular 3/2026: 32 numerales detectados). Es un tercer
-# tipo de hueco, distinto del namespace de literales/PARÁGRAFO (260-11) y
-# de los sub-numerales decimales (Decreto 2555) de arriba: acá no falta un
-# regex, falta que el mecanismo de fragmentación pueda aplicarse sin un
-# numero_articulo. No se ingirió ningún documento de 1.9 por encima del
-# umbral de dilución individualmente, así que no bloquea nada hoy — queda
-# para revisión futura si el uso real lo justifica.
 ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {
     "879",
     "477",
@@ -344,6 +331,29 @@ ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {
     "2.31.3.1.2",
     "2.6.12.1.2",
 }
+
+# Extensión de la fragmentación por numeral a documentos SIN artículos —
+# hueco confirmado en la sección "1.8. Orden administrativa": ninguno de
+# sus 3 documentos usa encabezados "ARTÍCULO N." (ARTICULO_HEADER_RE no
+# encuentra nada, _extraer_articulos devuelve todo el documento como un
+# solo fragmento con numero_articulo=None), pero los 3 SUPERAN el umbral
+# de dilución como documento completo (128,253 / 47,340 / 72,952
+# caracteres — hasta 4.8x el umbral) y SÍ tienen numeración interna por
+# numeral que _debe_fragmentarse_por_numeral() reconoce (313 / 18 / 69
+# numerales). A diferencia de las Circulares (sección 1.9, ninguna
+# superaba el umbral individualmente, quedó como backlog sin bloquear
+# nada), acá ingerir tal cual produciría filas gigantes muy por encima
+# del umbral que _debe_fragmentarse_por_numeral() existe para evitar.
+#
+# Misma disciplina de allowlist manual, uno por uno, tras dry-run limpio
+# con scripts/diagnosticar_fragmentacion_multiple.py (llamado sin
+# argumentos de numero_articulo = modo "documento completo", ya que
+# _fragmentar_articulo_por_numeral() es agnóstica a si el texto que
+# recibe es un artículo o el documento entero). Se indexa por url_base
+# (la URL del documento sin '#'), no por numero_articulo, porque acá no
+# existe. Empieza vacía — cada URL se agrega solo tras diagnóstico
+# aprobado, igual que ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA.
+DOCUMENTOS_SIN_ARTICULO_CON_FRAGMENTACION_NUMERAL_HABILITADA: set[str] = set()
 
 
 def _detectar_numerales(texto_articulo: str) -> list[re.Match]:
@@ -1484,23 +1494,41 @@ def ingestar_documento(
         if not texto_articulo or len(texto_articulo) < 20:
             continue
 
-        # Fragmentación por numeral (ver ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA):
-        # solo para el puñado de artículos ya confirmados como casos
-        # limpios se reemplaza la fila única por varias (una por
-        # numeral/parágrafo) — el resto del ET sigue insertándose como
-        # una sola fila por numero_articulo, igual que siempre.
-        if (
+        # Fragmentación por numeral (ver ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA
+        # y, para documentos sin numero_articulo,
+        # DOCUMENTOS_SIN_ARTICULO_CON_FRAGMENTACION_NUMERAL_HABILITADA):
+        # solo para el puñado de casos ya confirmados como limpios se
+        # reemplaza la fila única por varias (una por numeral/parágrafo)
+        # — el resto sigue insertándose como una sola fila, igual que
+        # siempre.
+        en_allowlist = (
             numero_articulo in ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA
-            and _debe_fragmentarse_por_numeral(texto_articulo)
-        ):
+            if numero_articulo
+            else url_base in DOCUMENTOS_SIN_ARTICULO_CON_FRAGMENTACION_NUMERAL_HABILITADA
+        )
+        if en_allowlist and _debe_fragmentarse_por_numeral(texto_articulo):
             sub_fragmentos = _fragmentar_articulo_por_numeral(texto_articulo)
         else:
             sub_fragmentos = [(None, texto_articulo)]
 
         for numeral, texto in sub_fragmentos:
-            url_fuente = f"{url_base}#{numero_articulo}" if numero_articulo else url_base
-            if numeral:
-                url_fuente = f"{url_fuente}#{numeral}"
+            if numero_articulo:
+                url_fuente = f"{url_base}#{numero_articulo}"
+                if numeral:
+                    url_fuente = f"{url_fuente}#{numeral}"
+            else:
+                # Sin numero_articulo real, "#numeral-N" en vez de
+                # "#N" a secas — evita que un futuro lector confunda esto
+                # con un numero_articulo genuino (ambos esquemas producen
+                # url_fuente de un solo '#' en aislamiento). Sigue siendo
+                # una URL verificable al documento original: el HTML
+                # fuente tampoco tiene anclas por numeral (solo por
+                # documento completo), así que un navegador la resuelve
+                # igual que url_base — carga la página correcta, sin
+                # scroll automático al numeral exacto. Ver diseño
+                # completo en el diagnóstico de la sección "1.8. Orden
+                # administrativa".
+                url_fuente = f"{url_base}#numeral-{numeral}" if numeral else url_base
             if _norma_existe(db, url_fuente):
                 logger.info("Ya existe, se omite: %s", url_fuente)
                 continue
