@@ -60,6 +60,19 @@ on:
         required: false
         type: boolean
         default: false
+      diagnosticar_seccion_nueva:
+        description: "Diagnóstico de SOLO LECTURA (no inserta nada en la BD) antes de escalar una sección nueva: descubre 'limite' documentos de 'seccion' y reporta por documento estado_vigencia (índice vs. texto), patrones de header/nota de vigencia no capturados por los regex actuales, y artículos que superan el umbral de dilución por longitud (>=26,627 chars) o que ya calificarían para fragmentación por numeral. No corre el scraper normal en la misma invocación."
+        required: false
+        type: boolean
+        default: false
+      ingerir_documento_url:
+        description: "MODO DE ESCRITURA: si se pasa, en vez de scrapear 'seccion' completa, ingiere SOLO este documento puntual (scripts/ingerir_documento_puntual.py) — pensado para insertar un único documento ya habilitado en una allowlist de fragmentación cuando el resto de su sección todavía no debe insertarse (ej. OA. 4 de 1989 en '1.8. Orden administrativa', mientras OA. 1 de 2005 y OA. 11 de 1996 siguen pendientes de diseño). No se puede combinar con ningún otro input de esta corrida."
+        required: false
+        default: ""
+      ingerir_documento_indice_derogado:
+        description: "Con ingerir_documento_url: 'true'/'false' si el índice marca este documento como derogado (vacío = sin señal del índice, se omite la verificación cruzada de vigencia)."
+        required: false
+        default: ""
 
 jobs:
   scraper:
@@ -85,6 +98,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Scraper DIAN (subconjunto de prueba)
+        if: ${{ github.event.inputs.diagnosticar_seccion_nueva != 'true' && github.event.inputs.ingerir_documento_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           SECCION: ${{ github.event.inputs.seccion }}
@@ -128,6 +142,22 @@ jobs:
             ARGS+=(--corregir-asimetria-derogado)
           fi
           python "${ARGS[@]}"
+
+      - name: Diagnóstico de sección nueva (solo lectura, sin BD)
+        if: ${{ github.event.inputs.diagnosticar_seccion_nueva == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          SECCION: ${{ github.event.inputs.seccion }}
+          LIMITE: ${{ github.event.inputs.limite }}
+        run: python scripts/diagnosticar_seccion.py "$SECCION" --limite "$LIMITE"
+
+      - name: Ingerir documento puntual (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.ingerir_documento_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.ingerir_documento_url }}
+          INDICE_DEROGADO: ${{ github.event.inputs.ingerir_documento_indice_derogado }}
+        run: python scripts/ingerir_documento_puntual.py "$URL_DOCUMENTO" "$INDICE_DEROGADO"
 
       - name: Diagnóstico de DOM (solo lectura, sobre el HTML ya guardado)
         if: always()

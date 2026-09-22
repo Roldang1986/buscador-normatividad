@@ -282,6 +282,15 @@ PARAGRAFO_HEADER_RE = re.compile(
     r"(?mi)^\s*(PAR[ÁA]GRAFO(?:\s+[0-9]+o?)?)\.?\s*(?=[<A-ZÁÉÍÓÚÑ])"
 )
 
+# Delimitador de SUB-BLOQUE (namespace) dentro de un artículo — NO es un
+# fragmento en sí mismo, solo abre un contexto nuevo para los numerales
+# que le siguen. Confirmado con el texto real de 260-11: "A." y "B." van
+# solos en su propia línea (la letra + punto, nada más), con el título
+# del sub-bloque en la línea siguiente ("A. \nDocumentación
+# comprobatoria"). Ver _fragmentar_articulo_por_numeral() para el
+# desambiguador que usa esto.
+LITERAL_HEADER_RE = re.compile(r"(?m)^[ \t]*([A-Z])\.[ \t]*$")
+
 # Fragmentar solo si el artículo es largo Y tiene numerales suficientes
 # para que partirlo tenga sentido natural — ver el análisis de por qué
 # es un AND y no un OR en la propuesta de diseño (un artículo largo sin
@@ -294,20 +303,193 @@ UMBRAL_NUMERALES_FRAGMENTACION = 10
 
 # Allowlist manual de artículos donde ingestar_documento() aplica de
 # verdad la fragmentación por numeral — deliberadamente NO es "todo
-# artículo que califique por umbral". De los 6 artículos de alto riesgo
-# analizados (879, 424, 477, 468-1, 260-11, 260-3), solo 879 y 477
-# resultaron casos limpios en el dry-run de scripts/prototipo_fragmentacion_numeral.py:
+# artículo que califique por umbral". De los 9 artículos de alto riesgo
+# analizados hasta ahora (879, 424, 477, 468-1, 260-11, 260-3, y del
+# Decreto 2555 de 2010: 5.2.4.3.1, 2.31.3.1.2, 2.6.12.1.2):
+# - 879, 477: casos limpios (dry-run de scripts/prototipo_fragmentacion_numeral.py).
+# - 260-11, 2.31.3.1.2, 2.6.12.1.2: tenían colisión de etiquetas (mismo
+#   numeral reaparece en sub-bloques independientes — literales "A."/"B."
+#   en 260-11, PARÁGRAFOs en los dos del Decreto 2555) — resuelto con el
+#   desambiguador de namespace de _fragmentar_articulo_por_numeral() (ver
+#   LITERAL_HEADER_RE y _normalizar_etiqueta_paragrafo()): el numeral se
+#   prefija con su sub-bloque ("A.1", "PARAGRAFO2.3"), sin colisiones.
 # - 424: sus numerales son en sí mismos listas arancelarias enormes — la
 #   fragmentación no resuelve su dilución (fragmentos igual de grandes).
-# - 260-11: tiene DOS listas numeradas independientes bajo literales
-#   "A."/"B." (etiquetas de numeral repetidas) — pendiente desambiguador
-#   de namespace por literal (ver LITERAL_HEADER_RE, no implementado
-#   todavía).
 # - 468-1: parágrafos duplicados sin numerar de forma distinguible.
 # - 260-3: no calificó para fragmentar (no cumple ambos umbrales).
+# - 5.2.4.3.1 (Decreto 2555): NO incluido todavía — su numeración real es
+#   decimal de dos niveles ("1.1", "3.2", "5.10") que NUMERAL_HEADER_RE no
+#   detecta en absoluto (solo ve los 8 numerales de primer nivel, cada
+#   uno grande); necesita un regex de sub-numeral decimal aparte, pendiente
+#   como tarea separada.
 # Agregar un artículo aquí solo tras confirmar con ese mismo dry-run que
 # no tiene ninguno de estos problemas.
-ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {"879", "477"}
+ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA = {
+    "879",
+    "477",
+    "260-11",
+    "2.31.3.1.2",
+    "2.6.12.1.2",
+}
+
+# Extensión de la fragmentación por numeral a documentos SIN artículos —
+# hueco confirmado en la sección "1.8. Orden administrativa": ninguno de
+# sus 3 documentos usa encabezados "ARTÍCULO N." (ARTICULO_HEADER_RE no
+# encuentra nada, _extraer_articulos devuelve todo el documento como un
+# solo fragmento con numero_articulo=None), pero los 3 SUPERAN el umbral
+# de dilución como documento completo (128,253 / 47,340 / 72,952
+# caracteres — hasta 4.8x el umbral) y SÍ tienen numeración interna por
+# numeral que _debe_fragmentarse_por_numeral() reconoce (313 / 18 / 69
+# numerales). A diferencia de las Circulares (sección 1.9, ninguna
+# superaba el umbral individualmente, quedó como backlog sin bloquear
+# nada), acá ingerir tal cual produciría filas gigantes muy por encima
+# del umbral que _debe_fragmentarse_por_numeral() existe para evitar.
+#
+# Misma disciplina de allowlist manual, uno por uno, tras dry-run limpio
+# con scripts/diagnosticar_fragmentacion_multiple.py (llamado sin
+# argumentos de numero_articulo = modo "documento completo", ya que
+# _fragmentar_articulo_por_numeral() es agnóstica a si el texto que
+# recibe es un artículo o el documento entero). Se indexa por url_base
+# (la URL del documento sin '#'), no por numero_articulo, porque acá no
+# existe. Empieza vacía — cada URL se agrega solo tras diagnóstico
+# aprobado, igual que ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA.
+#
+# NOTA: para el caso real que motivó esta allowlist (los 3 documentos de
+# "1.8. Orden administrativa"), terminó SIN usarse — ver
+# DOCUMENTOS_CON_FRAGMENTACION_POR_SECCION_ALTO_NIVEL_HABILITADA más
+# abajo. El texto real de OA. 4 de 1989 mostró que
+# _fragmentar_articulo_por_numeral() (fragmentación fina por numeral,
+# reutilizando el desambiguador de literal/PARÁGRAFO) no es segura ahí:
+# el documento es un manual de procedimiento de 1989 con jerarquía de
+# 3+ niveles (secciones romanas I/II/III/IV, dentro "ANEXO NO. N.",
+# literales mayúsculos Y minúsculos, numerales con punto Y con
+# paréntesis) formateada de forma INCONSISTENTE entre secciones gemelas
+# (ej. "A.\tOBJETIVO" con título en la misma línea vs. "B. \n" con
+# título en la línea siguiente — el mismo LITERAL_HEADER_RE que ya
+# tenemos captura uno y absorbe el otro en silencio). Forzar la
+# fragmentación fina ahí arriesgaba pérdida de contenido, no solo
+# colisión de etiquetas. Esta allowlist queda disponible para un futuro
+# documento sin numero_articulo que SÍ tenga una lista de numerales
+# limpia y plana (ej. como Circular 3/2026, sección 1.9 — no evaluado
+# todavía para fragmentar, solo diagnosticado).
+DOCUMENTOS_SIN_ARTICULO_CON_FRAGMENTACION_NUMERAL_HABILITADA: set[str] = set()
+
+# Fragmentación GRUESA por secciones de alto nivel — alternativa más
+# segura a la fragmentación fina por numeral para documentos como los 3
+# de "1.8. Orden administrativa": parte SOLO en las fronteras de
+# sección romana (I./II./III./IV., confirmadas en el texto real de OA.
+# 4 de 1989 alcanzando dos profundidades de anidamiento — otra vez
+# dentro de "ANEXO NO. 1") y "ANEXO NO. N.", sin bajar a nivel de
+# numeral ni de literal dentro de cada fragmento resultante (a
+# diferencia de _fragmentar_articulo_por_numeral). Menos preciso, pero
+# evita el riesgo de pérdida silenciosa por formato inconsistente
+# confirmado en OA. 4 de 1989.
+#
+# SECCION_ROMANA_HEADER_RE exige 2+ letras romanas ("II", "III", "IV")
+# para no confundirse con LITERAL_HEADER_RE (una sola letra mayúscula,
+# "A.", "B." — "I.", "V.", "X.", "L.", "C.", "D." y "M." solos también
+# son letras romanas válidas de un carácter, por eso el mínimo de 2).
+# El lookahead admite tanto "II. \n<título en la línea siguiente>" como
+# "III. ACTUALIZACION DE DIRECCIONES" (título en la misma línea) —
+# confirmado que OA. 4 de 1989 usa las dos variantes para el mismo tipo
+# de encabezado, igual de inconsistente que los literales. NO es un
+# validador de numeración romana real (no rechaza combinaciones
+# inválidas tipo "IIII"): para el propósito de un delimitador de
+# fragmento grueso, un falso positivo ocasional solo generaría un corte
+# de más (bajo riesgo), nunca absorción silenciosa de contenido.
+SECCION_ROMANA_HEADER_RE = re.compile(
+    r"(?m)^[ \t]*([IVXLCDM]{2,6})\.[ \t]*(?=[<A-ZÁÉÍÓÚÑ]|[ \t]*$)"
+)
+
+# "ANEXO NO. 1. ", "ANEXO NO. 2. ", "ANEXO NO. 3. " — confirmadas en el
+# texto real de OA. 4 de 1989, las 3 solas en su línea (nunca con
+# título en la misma línea). Deliberadamente NO calza con "anexo Nro. 3"
+# (minúscula, con "Nro." en vez de "NO.") — esa es una referencia
+# cruzada dentro de una oración, no un encabezado de sección.
+ANEXO_HEADER_RE = re.compile(r"(?mi)^[ \t]*ANEXO\s+NO\.?\s*([0-9]+)\.?[ \t]*$")
+
+
+def _normalizar_etiqueta_anexo(numero_crudo: str) -> str:
+    """'1' -> 'ANEXO1'. Namespace para las secciones romanas que sigan
+    a un ANEXO (ver _fragmentar_documento_por_secciones_alto_nivel) —
+    mismo problema que _normalizar_etiqueta_paragrafo(): en OA. 4 de
+    1989 las secciones romanas "II"/"III"/"IV" del cuerpo principal se
+    repiten tal cual dentro de "ANEXO NO. 1", así que sin este prefijo
+    colisionarían."""
+    return f"ANEXO{numero_crudo}"
+
+
+def _debe_fragmentarse_por_secciones_alto_nivel(texto_documento: str) -> bool:
+    """Mismo criterio de longitud que _debe_fragmentarse_por_numeral
+    (evitar dilución), pero sin el requisito de numerales — acá lo que
+    cuenta son las fronteras de sección/anexo, no un conteo de
+    numerales."""
+    return len(texto_documento) > UMBRAL_LONGITUD_FRAGMENTACION_NUMERAL
+
+
+def _fragmentar_documento_por_secciones_alto_nivel(
+    texto_documento: str,
+) -> list[tuple[str | None, str]]:
+    """Divide un documento COMPLETO (sin numero_articulo) en secciones
+    romanas (I./II./III./IV.) y anexos ("ANEXO NO. N."), sin descender a
+    numeral ni a literal dentro de cada una — ver el comentario largo
+    junto a DOCUMENTOS_CON_FRAGMENTACION_POR_SECCION_ALTO_NIVEL_HABILITADA
+    para por qué existe esta variante más gruesa.
+
+    Un ANEXO abre su propio namespace para las secciones romanas que le
+    sigan (ver _normalizar_etiqueta_anexo) — evita colisión con las
+    secciones romanas del cuerpo principal que reaparecen dentro de un
+    anexo. Cualquier texto antes del primer delimitador se conserva como
+    fragmento propio con etiqueta 'PREAMBULO' en vez de descartarse.
+
+    Si no hay ningún delimitador, devuelve [(None, texto_documento)] —
+    misma forma de retorno que _fragmentar_articulo_por_numeral cuando
+    no califica."""
+    if not _debe_fragmentarse_por_secciones_alto_nivel(texto_documento):
+        return [(None, texto_documento)]
+
+    delimitadores = sorted(
+        [("romano", m.start(), m.group(1)) for m in SECCION_ROMANA_HEADER_RE.finditer(texto_documento)]
+        + [("anexo", m.start(), m.group(1)) for m in ANEXO_HEADER_RE.finditer(texto_documento)],
+        key=lambda t: t[1],
+    )
+    if not delimitadores:
+        return [(None, texto_documento)]
+
+    fragmentos: list[tuple[str | None, str]] = []
+    preambulo = texto_documento[: delimitadores[0][1]].strip()
+    if preambulo:
+        fragmentos.append(("PREAMBULO", preambulo))
+
+    prefijo_activo: str | None = None
+    for i, (tipo, inicio, etiqueta_cruda) in enumerate(delimitadores):
+        fin = delimitadores[i + 1][1] if i + 1 < len(delimitadores) else len(texto_documento)
+        cuerpo = texto_documento[inicio:fin].strip()
+        if tipo == "anexo":
+            etiqueta = _normalizar_etiqueta_anexo(etiqueta_cruda)
+            prefijo_activo = etiqueta
+        else:
+            etiqueta = f"{prefijo_activo}.{etiqueta_cruda}" if prefijo_activo else etiqueta_cruda
+        fragmentos.append((etiqueta, cuerpo))
+    return fragmentos
+
+
+# Allowlist manual para _fragmentar_documento_por_secciones_alto_nivel —
+# misma disciplina que las anteriores: empieza vacía, se puebla caso por
+# caso tras dry-run limpio (scripts/diagnosticar_fragmentacion_alto_nivel.py).
+#
+# OA. 4 de 1989 (sección "1.8. Orden administrativa"): confirmado limpio
+# con el texto real — 10 fragmentos, sin colisión de etiquetas, máximo
+# 21.821 caracteres (bajo el umbral de 26.627). OA. 1 de 2005 y OA. 11
+# de 1996 quedan deliberadamente fuera: su texto real confirmó que NO
+# comparten esta estructura (ni romanos con punto consistentes ni
+# "ANEXO NO. N.") — cada uno tiene su propio formato distinto (mezcla de
+# numeración arábiga/romana sin punto en OA. 1; etiquetas compuestas
+# letra+punto+dígito tipo "A.2"/"C.1" en OA. 11), pendiente de diseño
+# aparte.
+DOCUMENTOS_CON_FRAGMENTACION_POR_SECCION_ALTO_NIVEL_HABILITADA: set[str] = {
+    "https://normograma.dian.gov.co/dian/compilacion/docs/orden_administrativa_dian_0004_1989.htm",
+}
 
 
 def _detectar_numerales(texto_articulo: str) -> list[re.Match]:
@@ -326,6 +508,16 @@ def _debe_fragmentarse_por_numeral(texto_articulo: str) -> bool:
     )
 
 
+def _normalizar_etiqueta_paragrafo(etiqueta_cruda: str) -> str:
+    """'PARÁGRAFO' (sin número — la convención legal para "el primer
+    parágrafo" cuando hay varios) -> 'PARAGRAFO1'. 'PARÁGRAFO 2o' ->
+    'PARAGRAFO2'. Usado como namespace para los numerales que sigan a un
+    parágrafo (ver _fragmentar_articulo_por_numeral)."""
+    m = re.search(r"[0-9]+", etiqueta_cruda)
+    numero = m.group(0) if m else "1"
+    return f"PARAGRAFO{numero}"
+
+
 def _fragmentar_articulo_por_numeral(texto_articulo: str) -> list[tuple[str | None, str]]:
     """Si texto_articulo cumple _debe_fragmentarse_por_numeral, lo divide
     en (etiqueta_numeral, texto_del_numeral) — cada fragmento lleva el
@@ -333,22 +525,47 @@ def _fragmentar_articulo_por_numeral(texto_articulo: str) -> list[tuple[str | No
     numeral) prefijado, para que conserve contexto temático propio y no
     dependa de que el agente vea también el artículo completo.
 
+    Desambiguador de namespace (confirmado con el texto real de 260-11 y
+    de 2.31.3.1.2/2.6.12.1.2 del Decreto 2555): recorre también
+    LITERAL_HEADER_RE (literales "A."/"B.") y usa PARAGRAFO_HEADER_RE
+    como delimitador DOBLE — un parágrafo sigue siendo un fragmento en sí
+    mismo, pero además abre su propio namespace para los numerales que le
+    sigan. Un literal, en cambio, nunca genera fragmento propio, solo
+    abre namespace. El numeral se etiqueta con su namespace activo
+    (ej. "A.1", "PARAGRAFO2.3") si hay alguno; si no, como antes ("1").
+
     Si NO cumple el criterio, devuelve [(None, texto_articulo)] sin
     cambios — misma forma de retorno en ambos casos para uso uniforme
     por el llamador (ver _extraer_articulos, incluso formato)."""
     if not _debe_fragmentarse_por_numeral(texto_articulo):
         return [(None, texto_articulo)]
 
-    matches = _detectar_numerales(texto_articulo)
-    preambulo = texto_articulo[: matches[0].start()].strip()
+    delimitadores = sorted(
+        [("numeral", m.start(), m.group(1).strip()) for m in NUMERAL_HEADER_RE.finditer(texto_articulo)]
+        + [("paragrafo", m.start(), m.group(1).strip()) for m in PARAGRAFO_HEADER_RE.finditer(texto_articulo)]
+        + [("literal", m.start(), m.group(1).strip()) for m in LITERAL_HEADER_RE.finditer(texto_articulo)],
+        key=lambda t: t[1],
+    )
+    preambulo = texto_articulo[: delimitadores[0][1]].strip()
 
     fragmentos: list[tuple[str | None, str]] = []
-    for i, m in enumerate(matches):
-        inicio = m.start()
-        fin = matches[i + 1].start() if i + 1 < len(matches) else len(texto_articulo)
-        etiqueta = m.group(1).strip()
-        cuerpo_numeral = texto_articulo[inicio:fin].strip()
-        texto_fragmento = f"{preambulo}\n\n{cuerpo_numeral}" if preambulo else cuerpo_numeral
+    prefijo_activo: str | None = None
+    for i, (tipo, inicio, etiqueta_cruda) in enumerate(delimitadores):
+        fin = delimitadores[i + 1][1] if i + 1 < len(delimitadores) else len(texto_articulo)
+        cuerpo = texto_articulo[inicio:fin].strip()
+
+        if tipo == "literal":
+            prefijo_activo = etiqueta_cruda
+            continue
+
+        if tipo == "paragrafo":
+            texto_fragmento = f"{preambulo}\n\n{cuerpo}" if preambulo else cuerpo
+            fragmentos.append((etiqueta_cruda, texto_fragmento))
+            prefijo_activo = _normalizar_etiqueta_paragrafo(etiqueta_cruda)
+            continue
+
+        etiqueta = f"{prefijo_activo}.{etiqueta_cruda}" if prefijo_activo else etiqueta_cruda
+        texto_fragmento = f"{preambulo}\n\n{cuerpo}" if preambulo else cuerpo
         fragmentos.append((etiqueta, texto_fragmento))
     return fragmentos
 
@@ -1413,23 +1630,61 @@ def ingestar_documento(
         if not texto_articulo or len(texto_articulo) < 20:
             continue
 
-        # Fragmentación por numeral (ver ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA):
-        # solo para el puñado de artículos ya confirmados como casos
-        # limpios se reemplaza la fila única por varias (una por
-        # numeral/parágrafo) — el resto del ET sigue insertándose como
-        # una sola fila por numero_articulo, igual que siempre.
-        if (
-            numero_articulo in ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA
-            and _debe_fragmentarse_por_numeral(texto_articulo)
-        ):
+        # Fragmentación por numeral, fina (ver ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA
+        # y, para documentos sin numero_articulo,
+        # DOCUMENTOS_SIN_ARTICULO_CON_FRAGMENTACION_NUMERAL_HABILITADA) o
+        # por sección, gruesa (ver
+        # DOCUMENTOS_CON_FRAGMENTACION_POR_SECCION_ALTO_NIVEL_HABILITADA,
+        # para documentos sin numero_articulo cuyo formato interno es
+        # demasiado inconsistente para la fragmentación fina — ver
+        # ejemplo real de "1.8. Orden administrativa"): solo para el
+        # puñado de casos ya confirmados como limpios se reemplaza la
+        # fila única por varias — el resto sigue insertándose como una
+        # sola fila, igual que siempre. La etiqueta resultante (numeral,
+        # o etiqueta de sección "II"/"ANEXO1.III") se guarda en la misma
+        # columna `numeral` en ambos casos — es la unidad de
+        # sub-fragmento más fina que _extraer_articulos no captura, sin
+        # importar si su origen es un numeral o una sección de alto
+        # nivel.
+        if numero_articulo:
+            en_allowlist_numeral = numero_articulo in ARTICULOS_CON_FRAGMENTACION_NUMERAL_HABILITADA
+            en_allowlist_seccion = False
+        else:
+            en_allowlist_numeral = url_base in DOCUMENTOS_SIN_ARTICULO_CON_FRAGMENTACION_NUMERAL_HABILITADA
+            en_allowlist_seccion = url_base in DOCUMENTOS_CON_FRAGMENTACION_POR_SECCION_ALTO_NIVEL_HABILITADA
+
+        etiqueta_tipo_subfragmento = "numeral"
+        if en_allowlist_numeral and _debe_fragmentarse_por_numeral(texto_articulo):
             sub_fragmentos = _fragmentar_articulo_por_numeral(texto_articulo)
+        elif en_allowlist_seccion and _debe_fragmentarse_por_secciones_alto_nivel(texto_articulo):
+            sub_fragmentos = _fragmentar_documento_por_secciones_alto_nivel(texto_articulo)
+            etiqueta_tipo_subfragmento = "sección"
         else:
             sub_fragmentos = [(None, texto_articulo)]
 
         for numeral, texto in sub_fragmentos:
-            url_fuente = f"{url_base}#{numero_articulo}" if numero_articulo else url_base
-            if numeral:
-                url_fuente = f"{url_fuente}#{numeral}"
+            if numero_articulo:
+                url_fuente = f"{url_base}#{numero_articulo}"
+                if numeral:
+                    url_fuente = f"{url_fuente}#{numeral}"
+            else:
+                # Sin numero_articulo real, "#frag-N" en vez de "#N" a
+                # secas — evita que un futuro lector confunda esto con
+                # un numero_articulo genuino (ambos esquemas producen
+                # url_fuente de un solo '#' en aislamiento). "frag-" y
+                # no "numeral-" porque `numeral` puede traer una
+                # etiqueta de numeral real ("12", "3.1") O una etiqueta
+                # de sección de alto nivel ("II", "ANEXO1.III") según
+                # cuál fragmentador se aplicó — ver el comentario sobre
+                # la columna `numeral` compartida más arriba. Sigue
+                # siendo una URL verificable al documento original: el
+                # HTML fuente tampoco tiene anclas por numeral/sección
+                # (solo por documento completo), así que un navegador la
+                # resuelve igual que url_base — carga la página
+                # correcta, sin scroll automático al punto exacto. Ver
+                # diseño completo en el diagnóstico de la sección "1.8.
+                # Orden administrativa".
+                url_fuente = f"{url_base}#frag-{numeral}" if numeral else url_base
             if _norma_existe(db, url_fuente):
                 logger.info("Ya existe, se omite: %s", url_fuente)
                 continue
@@ -1437,7 +1692,7 @@ def ingestar_documento(
             estado_vigencia, nota_vigencia = _estado_y_nota_vigencia(texto)
             fuente = _fuente_desde_url(url, tipo_norma, numero_articulo)
             if numeral:
-                fuente = f"{fuente}, numeral {numeral}"
+                fuente = f"{fuente}, {etiqueta_tipo_subfragmento} {numeral}"
 
             if indice_marca_derogado is not None:
                 texto_dice_derogado = estado_vigencia == "derogado"
