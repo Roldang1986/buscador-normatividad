@@ -254,19 +254,44 @@ Estado final: 3.398 filas, 0 `numero_documento` duplicados, 0 embeddings
 nulos.
 
 **Hallazgo nuevo — la fecha también viene corrupta:** el bug de captura
-copia el campo completo "número del fecha", no solo el número. En 6 filas
-(1728 y las 6 insertadas salvo 3542) `fecha_texto` no coincide con la
-fecha del título ni del documento. Sin corregir todavía.
+copia mal el campo completo "número del fecha" del catálogo, no solo el
+número. En 6 filas (1728 y las insertadas 3537-3541) `fecha_texto` no
+coincidía con la fecha del título ni del documento. **Corregidas en Neon
+(2026-09-22)** con la fecha del título (confirmada en el documento),
+con la misma guarda (`WHERE id=… AND fecha_texto=<valor viejo>`,
+exactamente una fila cada una):
+
+| id | numero_documento | fecha_texto corrupta | corregida |
+|---|---|---|---|
+| 1728 | 2008022419 - 001 | 3 de diciembre de 2008 | 29 de mayo de 2008 |
+| 3537 | 2011055880 - 001 | 24 de noviembre de 2011 | 2 de septiembre de 2011 |
+| 3538 | 2008063686 - 001 | 19 de septiembre de 2008 | 4 de noviembre de 2008 |
+| 3539 | 2008046316 - 001 | 8 de abril de 2008 | 10 de septiembre de 2008 |
+| 3540 | 2003038262 - 3 | 27 de julio de 2003 | 28 de agosto de 2003 |
+| 3541 | 2001079683 - 1 | 19 de febrero de 2002 | 29 de agosto de 2002 |
+
+Estas correcciones están solo en Neon: `ingest_pilot.py` no corrige
+fechas, así que una re-ingesta que re-inserte estos registros volvería a
+traer la fecha corrupta del catálogo.
+
+**Probablemente hay más filas con `fecha_texto` incorrecta.** El mismo
+bug (campo completo copiado mal del registro vecino) puede afectar la
+fecha de registros cuyo número quedó bien — esos no aparecieron en la
+investigación de la brecha, que solo comparó números (campo vs. título).
+Las 6 de arriba son solo las que salieron por estar entre las 14
+correcciones de número. Un censo completo de `fecha_texto` contra la
+fecha citada en el título, sobre los 3.431 registros de `ac`, queda
+**pendiente para otra sesión**.
 
 ## Pendiente antes de escalar a las ~750 páginas totales (`af`/`aj`)
 
 - `ac` ya está completo — no pendiente. Backfill de
   `CORRECCIONES_NUMERO_DOCUMENTO` aplicado (ver sección anterior), salvo
   `94013223 - 2` (id 3319), no verificable contra la fuente.
-- `fecha_texto` corrupta en 6 filas (ids 1728, 3537-3541): el campo no
-  coincide con la fecha del título/documento. Sin corregir todavía; y el
-  mismo bug de captura puede afectar la fecha de otros registros de `ac`
-  que no se revisaron (la investigación original solo comparó números).
+- Censo completo de `fecha_texto` vs. fecha del título en `ac`
+  (pendiente para otra sesión): las 6 filas conocidas ya se corrigieron,
+  pero el mismo bug de captura puede afectar otras que no se revisaron —
+  ver sección "Backfill de `CORRECCIONES_NUMERO_DOCUMENTO`".
 - Decidir throttling final (`--pausa`, por defecto 1s/página) para no
   saturar el sitio en una corrida de producción a mayor escala.
 - Extender el censo de formatos a `af`/`aj` (por ahora solo se censó
