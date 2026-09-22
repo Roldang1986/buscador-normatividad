@@ -6,7 +6,7 @@ from app.embeddings import embed_query
 from app.models import Norma
 
 MODEL_ID = "claude-sonnet-5"
-TOP_K = 5
+TOP_K = 10
 
 MENSAJE_SIN_NORMATIVIDAD = "No encontré normatividad indexada sobre esto."
 
