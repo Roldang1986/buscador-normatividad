@@ -40,3 +40,10 @@ class FuenteCitada(BaseModel):
 class ConsultaResponse(BaseModel):
     respuesta: str
     fuentes: list[FuenteCitada]
+
+
+class DiscusionResponse(BaseModel):
+    aviso: str
+    citas_textuales: list[str]
+    analisis_discusion: list[str]
+    fuentes: list[FuenteCitada]

@@ -8,7 +8,7 @@ from app import agent
 from app.database import get_db
 from app.embeddings import embed_document
 from app.models import Norma
-from app.schemas import ConsultaRequest, ConsultaResponse, NormaCreate, NormaRead
+from app.schemas import ConsultaRequest, ConsultaResponse, DiscusionResponse, NormaCreate, NormaRead
 
 app = FastAPI(
     title="Buscador de Normatividad Tributaria",
@@ -55,6 +55,16 @@ def verificar_api_key_ingesta(x_api_key: str | None = Header(None)) -> None:
 def consultar(payload: ConsultaRequest, db: Session = Depends(get_db)) -> ConsultaResponse:
     resultado = agent.responder_pregunta(db, payload.pregunta)
     return ConsultaResponse(**resultado)
+
+
+@app.post("/discutir", response_model=DiscusionResponse)
+def discutir(payload: ConsultaRequest, db: Session = Depends(get_db)) -> DiscusionResponse:
+    """Modo discusión: el agente puede razonar sobre los fragmentos
+    recuperados (implicaciones, tensiones entre normas, riesgos), a
+    diferencia de /consulta (citación estricta, sin razonar). Reutiliza
+    ConsultaRequest — el payload de entrada es idéntico ({"pregunta": ...})."""
+    resultado = agent.discutir_pregunta(db, payload.pregunta)
+    return DiscusionResponse(**resultado)
 
 
 @app.get("/norma/{norma_id}", response_model=NormaRead)
