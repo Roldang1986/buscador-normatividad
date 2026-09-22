@@ -477,7 +477,19 @@ def _fragmentar_documento_por_secciones_alto_nivel(
 # Allowlist manual para _fragmentar_documento_por_secciones_alto_nivel —
 # misma disciplina que las anteriores: empieza vacía, se puebla caso por
 # caso tras dry-run limpio (scripts/diagnosticar_fragmentacion_alto_nivel.py).
-DOCUMENTOS_CON_FRAGMENTACION_POR_SECCION_ALTO_NIVEL_HABILITADA: set[str] = set()
+#
+# OA. 4 de 1989 (sección "1.8. Orden administrativa"): confirmado limpio
+# con el texto real — 10 fragmentos, sin colisión de etiquetas, máximo
+# 21.821 caracteres (bajo el umbral de 26.627). OA. 1 de 2005 y OA. 11
+# de 1996 quedan deliberadamente fuera: su texto real confirmó que NO
+# comparten esta estructura (ni romanos con punto consistentes ni
+# "ANEXO NO. N.") — cada uno tiene su propio formato distinto (mezcla de
+# numeración arábiga/romana sin punto en OA. 1; etiquetas compuestas
+# letra+punto+dígito tipo "A.2"/"C.1" en OA. 11), pendiente de diseño
+# aparte.
+DOCUMENTOS_CON_FRAGMENTACION_POR_SECCION_ALTO_NIVEL_HABILITADA: set[str] = {
+    "https://normograma.dian.gov.co/dian/compilacion/docs/orden_administrativa_dian_0004_1989.htm",
+}
 
 
 def _detectar_numerales(texto_articulo: str) -> list[re.Match]:
