@@ -12,6 +12,14 @@ on:
         required: false
         type: boolean
         default: false
+      modo:
+        description: "Endpoint a probar con 'pregunta' (ignorado si preguntas_control=true, que siempre corre contra /consulta)"
+        required: false
+        type: choice
+        options:
+          - consulta
+          - discutir
+        default: consulta
 
 jobs:
   consulta:
@@ -33,12 +41,19 @@ jobs:
       - name: Correr migraciones (alembic upgrade head)
         run: alembic upgrade head
 
-      - name: Consulta ad hoc
-        if: ${{ github.event.inputs.preguntas_control != 'true' }}
+      - name: Consulta ad hoc (POST /consulta)
+        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.modo != 'discutir' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           PREGUNTA: ${{ github.event.inputs.pregunta }}
         run: python scripts/consulta_ad_hoc.py "$PREGUNTA"
+
+      - name: Discutir ad hoc (POST /discutir)
+        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.modo == 'discutir' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PREGUNTA: ${{ github.event.inputs.pregunta }}
+        run: python scripts/discutir_ad_hoc.py "$PREGUNTA"
 
       - name: Verificar preguntas de control (solo lectura, con BD)
         if: ${{ github.event.inputs.preguntas_control == 'true' }}
