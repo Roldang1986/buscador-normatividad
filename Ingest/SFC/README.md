@@ -145,16 +145,98 @@ raspados). Verificado post-mortem contra Neon y el log del run:
   del Pendiente pasa de "el paso de instalación existe en el yml" a
   "confirmado en una corrida real".
 
-## Pendiente antes de escalar a las ~750 páginas totales
+## Ingesta completa de `ac` (2026-09-17, run 35162789588)
 
+Con el fix de commit-por-página ya en `main`, se relanzó la ingesta
+completa de `ac` vía `scraper-sfc.yml` (workflow_dispatch, iniciada
+2026-09-16T23:33 UTC, ~1h7m, status success). Verificado directo contra
+Neon (2026-09-18): `documentos_sfc` tiene **3.392 registros**, todos
+`tipo_documento='concepto'` (= `ac`) y todos con `embedding` no nulo;
+3.374 con `tiene_texto_completo=true`, 13 `descarga_fallida`, 5
+`sin_archivo`, cero `extraccion_fallida`/`formato_no_reconocido`. El
+catálogo reporta 3.431 registros totales para `ac` — la brecha de 39
+registros se investigó a fondo (ver siguiente sección): confirmada como
+deduplicación real por el índice único, con causa raíz identificada.
+
+## Investigación de la brecha `ac`: 3.431 (catálogo) vs 3.392 (BD) — 2026-09-18
+
+**Causa confirmada:** el censo completo de `numero_documento` tiene
+exactamente 39 valores duplicados (3.431 registros → 3.392 valores
+únicos), y el índice único `uq_documentos_sfc_tipo_numero` +
+`ON CONFLICT ... DO NOTHING` en `ingest_pilot.py` descarta en silencio
+el segundo insert de cada par — sin error, sin log, por diseño. Cero
+registros con `numero_documento` nulo/vacío, cero inserts fallidos sin
+reintentar en el log de la corrida (run 35162789588): el mecanismo es
+exactamente el índice único, no un bug de inserción.
+
+**De los 39 pares, no todos son el mismo documento.** Cruzando el
+`numero_documento` extraído del campo estructurado del catálogo contra
+el número citado dentro del texto del título de cada registro (ej.
+"Concepto No. 2008038350-001 del..."), y re-raspando el catálogo
+completo (3.431 registros, no solo los pares) para revisar el registro
+inmediatamente anterior de cada caso, aparece un **bug de captura del
+propio sitio de la SFC**: al cargar una entrada nueva, a veces queda
+copiado sin actualizar el valor de la entrada anterior — a veces en el
+campo estructurado `numero_documento`, a veces en la cita dentro del
+título — nunca en dirección constante. Esto se extendió más allá de
+los 39 pares: sobre los 3.431 registros completos hay **35 casos**
+donde campo y título no coinciden (27 no formaban parte de los 39
+pares originales, porque su `numero_documento` de campo no colisiona
+con ningún otro registro existente — el dato queda simplemente
+incorrecto, sin causar una fila duplicada visible).
+
+**Corrección aplicada:** 14 de esos casos se verificaron
+individualmente contra el registro anterior en el orden del catálogo
+(firma inequívoca: el campo corrupto coincide exactamente con el
+`numero_documento` del registro previo, o el mismo documento aparece
+una sola vez con el campo truncado/con un dígito mal tecleado) y se
+cargaron como una lista de excepciones puntual y hardcodeada —
+**no una heurística general** — en
+`CORRECCIONES_NUMERO_DOCUMENTO` (`ingest_pilot.py`), aplicada por
+`(numero_documento, url_archivo)` justo antes del insert. Esto corrige
+el dato para una futura re-ingesta (no modifica retroactivamente los
+3.392 registros ya cargados en Neon; una re-ingesta completa o un
+backfill puntual de estos 14 documentos sigue pendiente de ejecutar).
+
+**Casos conocidos sin corregir (requieren revisión manual, no forzados
+a ninguna regla automática):**
+- `2002028975-2` vs `2002028975-3` (concepto "Inversiones de las
+  entidades financieras"): un dígito de diferencia en el sufijo, sin
+  la firma de copia del registro vecino que confirma los otros 14 — no
+  hay forma de determinar automáticamente cuál valor es el correcto.
+- `2024096444-001` ("Contratos de uso de red" / "Habeas Data"): el
+  contenido del título para este registro fue inconsistente entre dos
+  raspados hechos la misma noche con minutos de diferencia — posible
+  inestabilidad de orden/paginación del catálogo en vivo entre
+  corridas, no solo un typo. Necesita re-verificación antes de decidir
+  cualquier corrección.
+- `"Concepto interno"`: dos (o más) conceptos internos genuinamente
+  distintos comparten literalmente esta misma etiqueta genérica sin
+  número propio — no es un dato mal tecleado que se pueda "corregir" a
+  un número real; requeriría una estrategia de desambiguación distinta
+  (ej. una clave artificial) si se decide priorizarlo.
+- Quedan además casos dentro de los 39 pares originales que no se
+  revisaron en tanto detalle como los 14 corregidos ni como los 3
+  anteriores — la investigación se detuvo aquí deliberadamente: el
+  problema real afecta a lo sumo ~25-39 documentos de 3.431 (bien por
+  debajo del 1% del corpus `ac`), y no justificaba construir
+  heurísticas cada vez más específicas la misma noche.
+
+## Pendiente antes de escalar a las ~750 páginas totales (`af`/`aj`)
+
+- `ac` ya está completo — no pendiente. Los 14 documentos recuperables
+  por `CORRECCIONES_NUMERO_DOCUMENTO` no están todavía en la BD (el fix
+  es para la próxima re-ingesta); ejecutar esa re-ingesta o un backfill
+  puntual sigue pendiente si se prioriza.
 - Decidir throttling final (`--pausa`, por defecto 1s/página) para no
-  saturar el sitio en una corrida de producción.
+  saturar el sitio en una corrida de producción a mayor escala.
 - Extender el censo de formatos a `af`/`aj` (por ahora solo se censó
-  `ac`) antes de ingerir texto completo de esas dos colecciones.
-- Relanzar la ingesta completa de `ac` (la corrida del 2026-09-16 se
-  canceló en página 110/138 y no dejó nada persistido, ver sección
-  arriba — con el commit por página ya no debería volver a pasar, pero
-  la corrida en sí sigue pendiente de correr completa).
+  `ac`) antes de ingerir texto completo de esas dos colecciones. El
+  mismo bug de captura de `numero_documento` (ver sección anterior)
+  probablemente también afecta a `af`/`aj` — conviene tenerlo presente
+  al revisar sus censos, aunque no se investigó ahí todavía.
+- Casos ambiguos de `ac` sin corregir (ver sección anterior): revisión
+  manual pendiente, sin urgencia (<1% del corpus).
 
 ## Cómo seguir
 

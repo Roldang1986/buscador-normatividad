@@ -28,6 +28,41 @@ from scraper import raspar_coleccion
 
 FUENTE_ATRIBUCION = "Fuente: Superintendencia Financiera de Colombia www.superfinanciera.gov.co"
 
+# Correcciones puntuales de `numero_documento` para registros de `ac` donde
+# el propio catálogo de la SFC tiene el campo estructurado mal cargado (con
+# el valor de otro registro adyacente en la lista, típicamente el anterior),
+# mientras que el número citado en el texto del título es el correcto. Sin
+# esto, el índice único `(tipo_documento, numero_documento)` los trataría
+# como duplicados del registro vecino y `ON CONFLICT DO NOTHING` descartaría
+# en silencio el documento con el campo mal cargado.
+#
+# Confirmadas de forma individual (no es una heurística general — cada una
+# se verificó contra el registro anterior en el orden del catálogo, o contra
+# una lectura manual del título) durante la investigación de la brecha
+# ac: catálogo=3.431 vs `documentos_sfc`=3.392 (2026-09-18, ver README). NO
+# cubre todos los casos de esa brecha: quedan casos ambiguos sin corregir,
+# documentados en el README bajo "Casos conocidos sin corregir".
+#
+# Clave: (numero_documento tal como lo devuelve el parser, url_archivo) —
+# numero_documento solo no alcanza porque es justamente el valor duplicado
+# entre los dos registros que colisionan.
+CORRECCIONES_NUMERO_DOCUMENTO: dict[tuple[str, str], str] = {
+    ("2011082287 - 002", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2011/2011055880.doc"): "2011055880-001",
+    ("2008038350 - 001", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2008/2008063686.pdf"): "2008063686-001",
+    ("2008020774 - 001", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2008/2008046316.pdf"): "2008046316-001",
+    ("2003029670 - 1", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/doctrinas2003/sistemgralpens099.htm"): "2003038262-3",
+    ("2002007416 - 2", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/doctrinas2002/sistemagralpen118.htm"): "2001079683-1",
+    ("97020097 - 1", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/doctrinas1994-8/97003336.doc"): "97003336-2",
+    ("2019078353 - 004", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=descargar&idFile=1039738"): "2019078535-004",
+    ("2010058231 - 00", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2010/2010058231.doc"): "2010058231-003",
+    ("2008022419 - 00", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2008/2008022419.pdf"): "2008022419-001",
+    ("2008039332 - 00", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2008/2008039332.pdf"): "2008039332-003",
+    ("2008066040 - 00", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2008/2008066040.pdf"): "2008066040-001",
+    ("2007000231 - 00", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2007/2007000231.pdf"): "2007000231-001",
+    ("999039821 - 2", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/doctrinas1999/evaluacioncartera0069.htm"): "1999039821-2",
+    ("94013223 - 2", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/doctrinas1994-8/97401323.doc"): "97013223-2",
+}
+
 # Límite de caracteres del texto completo dentro del input de embedding,
 # para no acercarse al límite de tokens de voyage-3.5 en un solo request.
 TRUNCADO_TEXTO_COMPLETO = 12000
@@ -96,11 +131,15 @@ def ingestar_pilotos(
 
                 vector = embed_document(texto_embedding)
 
+                numero_documento = CORRECCIONES_NUMERO_DOCUMENTO.get(
+                    (r["numero_documento"], r["url_archivo"]), r["numero_documento"]
+                )
+
                 resultado = conn.execute(
                     INSERT_SQL,
                     {
                         "tipo_documento": r["tipo_documento"],
-                        "numero_documento": r["numero_documento"],
+                        "numero_documento": numero_documento,
                         "fecha_texto": r["fecha_texto"],
                         "expediente_radicado": r["expediente_radicado"],
                         "autor_corporativo": r["autor_corporativo"],
