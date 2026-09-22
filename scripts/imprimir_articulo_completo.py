@@ -6,8 +6,13 @@ a mano un caso puntual (ej. confirmar si una mención de "modificado"
 fuera de "<...>" es una nota de vigencia real o solo texto sustantivo
 citando que OTRA norma fue modificada).
 
+Si numero_articulo se omite (o se pasa vacío), imprime el DOCUMENTO
+COMPLETO — modo para documentos sin encabezados "ARTÍCULO N." (ej. la
+sección "1.8. Orden administrativa"), donde _extraer_articulos ya
+devuelve [(None, texto_completo)].
+
 Uso:
-    python scripts/imprimir_articulo_completo.py <url_documento> <numero_articulo>
+    python scripts/imprimir_articulo_completo.py <url_documento> [numero_articulo]
 """
 
 import sys
@@ -21,12 +26,12 @@ from app.ingest.dian_scraper import (
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
 
     url = sys.argv[1].split("#")[0]
-    numero = sys.argv[2]
+    numero = sys.argv[2] if len(sys.argv) >= 3 and sys.argv[2] else None
 
     html = descargar_html(url)
     texto = _texto_plano(html)
