@@ -12,7 +12,7 @@ export default function Respuesta({ resultado, corpus = "tributario", onVerTexto
           <div className="respuesta__fuentes-lista">
             {resultado.fuentes.map((fuente) => (
               <TarjetaFuente
-                key={fuente.id}
+                key={`${fuente.origen || corpus}-${fuente.id}`}
                 fuente={fuente}
                 corpus={corpus}
                 onVerTextoCompleto={onVerTextoCompleto}

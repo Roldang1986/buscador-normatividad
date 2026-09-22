@@ -13,7 +13,7 @@ export default function App() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
   const [resultado, setResultado] = useState(null);
-  const [documentoIdModal, setDocumentoIdModal] = useState(null);
+  const [documentoModal, setDocumentoModal] = useState(null);
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const { historial, agregar, borrar } = useHistorial();
 
@@ -58,7 +58,11 @@ export default function App() {
         <CajaPregunta onEnviar={manejarConsulta} cargando={cargando} />
         {error && <p className="app__error">{error}</p>}
         {cargando && <p className="app__cargando">Buscando en la normatividad…</p>}
-        <Respuesta resultado={resultado} corpus={corpus} onVerTextoCompleto={setDocumentoIdModal} />
+        <Respuesta
+          resultado={resultado}
+          corpus={corpus}
+          onVerTextoCompleto={(id, origen) => setDocumentoModal({ id, origen })}
+        />
       </main>
 
       <Historial
@@ -69,11 +73,12 @@ export default function App() {
         onCerrar={() => setHistorialAbierto(false)}
       />
 
-      {documentoIdModal !== null && (
+      {documentoModal !== null && (
         <ModalTexto
-          documentoId={documentoIdModal}
+          documentoId={documentoModal.id}
           corpus={corpus}
-          onCerrar={() => setDocumentoIdModal(null)}
+          origen={documentoModal.origen}
+          onCerrar={() => setDocumentoModal(null)}
         />
       )}
     </div>

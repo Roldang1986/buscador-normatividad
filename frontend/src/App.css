@@ -85,7 +85,9 @@
 }
 
 .tarjeta-fuente__estado--modificado,
-.tarjeta-fuente__estado--derogado {
+.tarjeta-fuente__estado--derogado,
+.tarjeta-fuente__estado--vigencia_futura,
+.tarjeta-fuente__estado--vigencia_condicionada {
   background: #fdecea;
   color: #b00020;
   font-weight: bold;

@@ -56,6 +56,14 @@ export async function consultarPreguntaSFC(pregunta) {
   return respuesta.json();
 }
 
+export async function obtenerNormaCBFCompleta(id) {
+  const respuesta = await fetch(`${API_BASE_URL}/norma-cbf/${id}`);
+  if (!respuesta.ok) {
+    throw new Error(`No se pudo obtener el texto completo (HTTP ${respuesta.status})`);
+  }
+  return respuesta.json();
+}
+
 export async function obtenerDocumentoSFCCompleto(id) {
   const respuesta = await fetch(`${API_BASE_URL}/documento-sfc/${id}`);
   if (!respuesta.ok) {

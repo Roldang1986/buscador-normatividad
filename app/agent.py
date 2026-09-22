@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.embeddings import embed_query
-from app.models import DocumentoSFC, Norma
+from app.models import DocumentoSFC, Norma, NormaCBF
 
 MODEL_ID = "claude-sonnet-5"
 TOP_K = 5
@@ -125,7 +125,8 @@ def responder_pregunta(db: Session, pregunta: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Corpus SFC (doctrina y jurisprudencia de la Superintendencia Financiera).
+# Corpus SFC (Circular Básica Financiera + doctrina y jurisprudencia de la
+# Superintendencia Financiera).
 # Función separada a propósito, no una generalización de responder_pregunta:
 # el corpus tributario de arriba queda intocado mientras este sigue en
 # construcción. Espejo de Ingest/SFC/query_pilot.py, pero como parte del
@@ -133,48 +134,95 @@ def responder_pregunta(db: Session, pregunta: str) -> dict:
 # ---------------------------------------------------------------------------
 
 TOP_K_SFC = 5
+TOP_K_CBF = 5
+# Con 10 fragmentos (5 CBF + 5 conceptos) las respuestas que separan norma y
+# doctrina superan 4.096 tokens; el JSON quedaba cortado y parse() fallaba.
+MAX_TOKENS_SFC = 12000
 
 MENSAJE_SIN_NORMATIVIDAD_SFC = (
-    "No encontré doctrina o jurisprudencia de la Superfinanciera indexada sobre esto."
+    "No encontré normatividad, doctrina o jurisprudencia de la Superfinanciera "
+    "indexada sobre esto."
 )
 
-SYSTEM_PROMPT_SFC = f"""Eres un asistente experto en doctrina y jurisprudencia de la
-Superintendencia Financiera de Colombia (SFC). Respondes ÚNICAMENTE con base en los
-fragmentos entregados como contexto en cada mensaje (recuperados por búsqueda
-semántica de un catálogo de conceptos, fallos y jurisprudencia de la SFC). Nunca
-respondas con conocimiento general ni con lo que recuerdes de tu entrenamiento.
+# Limitación del régimen de transición de la CBF: va como regla explícita en
+# el prompt (no solo en Ingest/CBF/README.md) porque el modelo no lee el
+# README en tiempo de respuesta.
+LIMITACION_TRANSICION_CBF = (
+    "Este corpus no captura circulares puntuales de 2023-2024 que puedan "
+    "mantener vigencia residual bajo la cláusula de salvaguarda de la Circular "
+    "Externa 006 de 2025 (régimen de transición). Si la pregunta del usuario "
+    "depende de vigencia normativa reciente o de un régimen de transición "
+    "específico, menciona esta limitación explícitamente antes de responder "
+    "con lo que sí está indexado."
+)
 
-Distingue SIEMPRE el valor normativo de cada fragmento según su tipo_documento:
-- "concepto" (doctrina): es la interpretación/opinión de la Superintendencia sobre
-  una norma, dirigida a quien consulta. NO es vinculante ni de obligatorio
-  cumplimiento para terceros, no sienta precedente judicial, y la propia entidad
-  puede reconsiderarla en un concepto posterior. Preséntalo como "según el
-  concepto de la SFC No. X..." o "en criterio de la Superintendencia...", nunca
-  como si fuera una norma o una decisión obligatoria.
-- "fallo" / "jurisprudencia": es la decisión de una autoridad sobre un caso
-  concreto. SÍ es vinculante para las partes de ese caso y puede tener valor de
-  precedente. Preséntalo como "en el fallo/la decisión No. X..." y aclara que
-  aplica al caso decidido — no lo generalices automáticamente a cualquier
-  situación distinta.
+SYSTEM_PROMPT_SFC = f"""Eres un asistente experto en regulación, doctrina y
+jurisprudencia de la Superintendencia Financiera de Colombia (SFC). Respondes
+ÚNICAMENTE con base en los fragmentos entregados como contexto en cada mensaje
+(recuperados por búsqueda semántica de dos fuentes: la Circular Básica
+Financiera y el catálogo de conceptos, fallos y jurisprudencia de la SFC).
+Nunca respondas con conocimiento general ni con lo que recuerdes de tu
+entrenamiento.
 
-Si citas fragmentos de ambos tipos en la misma respuesta, sepáralos
-explícitamente: cuáles son doctrina (no vinculante) y cuáles son decisión de un
-caso concreto (vinculante para las partes). No les des el mismo peso.
+Cada fragmento trae un campo "origen". Distingue SIEMPRE su valor normativo:
+- origen "normas_cbf" (Circular Básica Financiera): es NORMA VIGENTE, de
+  obligatorio cumplimiento para las entidades vigiladas. Preséntala como
+  "según la Circular Básica Financiera, Parte X, Capítulo Y, numeral Z...".
+- origen "documentos_sfc" con tipo_documento "concepto" (doctrina): es la
+  interpretación/opinión de la Superintendencia sobre una norma, dirigida a
+  quien consulta. NO es vinculante ni de obligatorio cumplimiento para
+  terceros, no sienta precedente judicial, y la propia entidad puede
+  reconsiderarla en un concepto posterior. Preséntalo como "según el concepto
+  de la SFC No. X..." o "en criterio de la Superintendencia...", nunca como si
+  fuera una norma o una decisión obligatoria.
+- origen "documentos_sfc" con tipo_documento "fallo" / "jurisprudencia": es la
+  decisión de una autoridad sobre un caso concreto. SÍ es vinculante para las
+  partes de ese caso y puede tener valor de precedente. Preséntalo como "en el
+  fallo/la decisión No. X..." y aclara que aplica al caso decidido — no lo
+  generalices automáticamente a cualquier situación distinta.
 
-(Hoy la base solo tiene doctrina —tipo_documento="concepto"— indexada; fallos y
-jurisprudencia se cargarán más adelante, pero esta distinción rige desde ya.)
+Si citas fragmentos de distinto tipo en la misma respuesta, sepáralos
+explícitamente (norma vigente / doctrina no vinculante / decisión de un caso
+concreto). No les des el mismo peso.
+
+Orden cuando un concepto interpreta una norma también citada: si la pregunta
+es sobre el CONTENIDO O ALCANCE DE UNA NORMA, cita la norma primero y el
+concepto después, como interpretación. Si la pregunta es sobre QUÉ HA
+INTERPRETADO O RESUELTO LA SUPERFINANCIERA en un caso concreto, el concepto
+encabeza la respuesta y la norma aparece como su fundamento. El criterio es el
+tipo de pregunta, no una regla fija de qué va primero.
+
+(Hoy la base solo tiene doctrina —tipo_documento="concepto"— indexada en
+documentos_sfc; fallos y jurisprudencia se cargarán más adelante, pero esta
+distinción rige desde ya.)
 
 Reglas estrictas:
 1. Solo puedes afirmar algo si está respaldado textualmente por uno o más de
    los fragmentos entregados. No completes vacíos de información con memoria
    propia ni suposiciones.
-2. Cada afirmación cita tipo de documento, número y fecha tal como aparecen en
-   el fragmento correspondiente. No inventes ni parafrasees números ni fechas.
+2. Cada afirmación cita su fuente tal como aparece en el fragmento: para
+   normas_cbf, parte, capítulo y numeral; para documentos_sfc, tipo de
+   documento, número y fecha. No inventes ni parafrasees números ni fechas.
 3. Si los fragmentos entregados no contienen información suficiente o
    relevante, no intentes responder de todos modos: responde exactamente
    "{MENSAJE_SIN_NORMATIVIDAD_SFC}" y deja la lista de fragmentos citados vacía.
-4. Al final de la respuesta, incluye la línea de fuente_atribucion de los
-   fragmentos citados, tal como aparece en el fragmento.
+4. Para cada fragmento de normas_cbf citado, revisa su estado_vigencia. Si es
+   "vigencia_futura" o "vigencia_condicionada", adviértelo explícitamente e
+   incluye su nota_vigencia — nunca lo presentes como aplicable hoy.
+5. Para cifras, porcentajes, plazos y condiciones específicas de la norma,
+   transcribe el texto exacto del fragmento entre comillas.
+6. {LIMITACION_TRANSICION_CBF}
+7. Si un concepto de documentos_sfc cita explícitamente una circular o norma
+   anterior a la Circular Básica Financiera vigente (por ejemplo la Circular
+   Externa 100 de 1995, la Circular Externa 24 de 1997, la Circular Externa
+   44 de 1997, o cualquier otra norma que el propio texto del fragmento
+   muestre como reemplazada), adviértelo explícitamente: la norma citada por
+   el concepto ya no rige y el criterio del concepto podría estar
+   desactualizado. Basa esta advertencia solo en lo que dice el texto de los
+   fragmentos entregados; no afirmes la derogatoria de una norma específica
+   con conocimiento propio más allá de eso.
+8. Al final de la respuesta, incluye la línea de fuente_atribucion de los
+   fragmentos citados de documentos_sfc, tal como aparece en el fragmento.
 """
 
 
@@ -184,11 +232,10 @@ class _RespuestaAgenteSFC(BaseModel):
 
 
 def buscar_fragmentos_relevantes_sfc(
-    db: Session, pregunta: str, top_k: int = TOP_K_SFC
+    db: Session, vector: list[float], top_k: int = TOP_K_SFC
 ) -> list[DocumentoSFC]:
     """Búsqueda semántica top-k en `documentos_sfc` por similitud coseno.
     Nunca toca `norma` (corpus tributario)."""
-    vector = embed_query(pregunta)
     return (
         db.query(DocumentoSFC)
         .filter(DocumentoSFC.embedding.is_not(None))
@@ -198,37 +245,84 @@ def buscar_fragmentos_relevantes_sfc(
     )
 
 
-def _formatear_contexto_sfc(fragmentos: list[DocumentoSFC]) -> str:
-    bloques = []
-    for i, d in enumerate(fragmentos, start=1):
-        texto = (d.texto_completo or d.resumen or "")[:8000]
-        bloques.append(
+def buscar_fragmentos_relevantes_cbf(
+    db: Session, vector: list[float], top_k: int = TOP_K_CBF
+) -> list[NormaCBF]:
+    """Búsqueda semántica top-k en `normas_cbf`. Solo trae filas 'articulo':
+    'anexo_zip' y 'reservado' no tienen embedding (ni texto que citar)."""
+    return (
+        db.query(NormaCBF)
+        .filter(NormaCBF.tipo_registro == "articulo", NormaCBF.embedding.is_not(None))
+        .order_by(NormaCBF.embedding.cosine_distance(vector))
+        .limit(top_k)
+        .all()
+    )
+
+
+def _formatear_fragmento_sfc(i: int, f: DocumentoSFC | NormaCBF) -> str:
+    if isinstance(f, NormaCBF):
+        return (
             f"[Fragmento {i}]\n"
-            f"tipo_documento: {d.tipo_documento}\n"
-            f"numero_documento: {d.numero_documento or 'N/A'}\n"
-            f"fecha: {d.fecha_texto or 'N/A'}\n"
-            f"titulo: {d.titulo or 'N/A'}\n"
-            f"fuente_atribucion: {d.fuente_atribucion}\n"
-            f"texto: {texto}"
+            f"origen: normas_cbf\n"
+            f"fuente: {f.fuente}\n"
+            f"numeral: {f.numeral or 'N/A'}\n"
+            f"estado_vigencia: {f.estado_vigencia}\n"
+            f"nota_vigencia: {f.nota_vigencia or 'N/A'}\n"
+            f"texto: {(f.texto or '')[:8000]}"
         )
-    return "\n\n".join(bloques)
+    texto = (f.texto_completo or f.resumen or "")[:8000]
+    return (
+        f"[Fragmento {i}]\n"
+        f"origen: documentos_sfc\n"
+        f"tipo_documento: {f.tipo_documento}\n"
+        f"numero_documento: {f.numero_documento or 'N/A'}\n"
+        f"fecha: {f.fecha_texto or 'N/A'}\n"
+        f"titulo: {f.titulo or 'N/A'}\n"
+        f"fuente_atribucion: {f.fuente_atribucion}\n"
+        f"texto: {texto}"
+    )
 
 
-def _fuente_dict_sfc(d: DocumentoSFC) -> dict:
+def _formatear_contexto_sfc(fragmentos: list[DocumentoSFC | NormaCBF]) -> str:
+    return "\n\n".join(
+        _formatear_fragmento_sfc(i, f) for i, f in enumerate(fragmentos, start=1)
+    )
+
+
+def _fuente_dict_sfc(f: DocumentoSFC | NormaCBF) -> dict:
+    # "origen" le dice al frontend qué tarjeta dibujar y a qué endpoint pedir
+    # el texto completo (/documento-sfc/{id} vs /norma-cbf/{id}) — los ids
+    # de las dos tablas se pisan entre sí.
+    if isinstance(f, NormaCBF):
+        return {
+            "origen": "normas_cbf",
+            "id": f.id,
+            "fuente": f.fuente,
+            "numeral": f.numeral,
+            "estado_vigencia": f.estado_vigencia,
+            "url_archivo": f.url_archivo,
+        }
     return {
-        "id": d.id,
-        "tipo_documento": d.tipo_documento,
-        "numero_documento": d.numero_documento,
-        "fecha_texto": d.fecha_texto,
-        "titulo": d.titulo,
-        "fuente_atribucion": d.fuente_atribucion,
+        "origen": "documentos_sfc",
+        "id": f.id,
+        "tipo_documento": f.tipo_documento,
+        "numero_documento": f.numero_documento,
+        "fecha_texto": f.fecha_texto,
+        "titulo": f.titulo,
+        "fuente_atribucion": f.fuente_atribucion,
     }
 
 
 def responder_pregunta_sfc(db: Session, pregunta: str) -> dict:
-    """Punto de entrada del agente RAG para el corpus SFC. Espejo de
-    responder_pregunta, pero sobre documentos_sfc en vez de norma."""
-    fragmentos = buscar_fragmentos_relevantes_sfc(db, pregunta)
+    """Punto de entrada del agente RAG para el corpus SFC: busca por separado
+    en normas_cbf (norma vigente) y documentos_sfc (doctrina) con el mismo
+    embedding de la pregunta, y le entrega ambos al modelo marcados por
+    origen. Nunca toca `norma` (corpus tributario)."""
+    vector = embed_query(pregunta)
+    fragmentos: list[DocumentoSFC | NormaCBF] = [
+        *buscar_fragmentos_relevantes_cbf(db, vector),
+        *buscar_fragmentos_relevantes_sfc(db, vector),
+    ]
 
     if not fragmentos:
         return {"respuesta": MENSAJE_SIN_NORMATIVIDAD_SFC, "fuentes": []}
@@ -236,22 +330,25 @@ def responder_pregunta_sfc(db: Session, pregunta: str) -> dict:
     contexto = _formatear_contexto_sfc(fragmentos)
 
     user_message = (
-        "Fragmentos de doctrina/jurisprudencia SFC recuperados (usa solo esto "
-        "como fuente de verdad):\n\n"
+        "Fragmentos de normatividad (Circular Básica Financiera) y de "
+        "doctrina/jurisprudencia SFC recuperados (usa solo esto como fuente "
+        "de verdad):\n\n"
         f"{contexto}\n\n"
         f"Pregunta del usuario: {pregunta}\n\n"
-        "Responde citando tipo de documento, número y fecha de cada fragmento "
-        "usado, distinguiendo doctrina de jurisprudencia según la regla del "
-        "system prompt. En 'fragmentos_citados' incluye los números (1-based) "
-        "que respaldan tu respuesta. Si ningún fragmento es suficiente, deja "
-        f'\'fragmentos_citados\' vacío y responde exactamente: '
+        "Responde citando la fuente de cada fragmento usado, distinguiendo "
+        "norma vigente, doctrina y jurisprudencia según las reglas del system "
+        "prompt. En 'fragmentos_citados' incluye los números (1-based) que "
+        "respaldan tu respuesta, en el mismo orden en que los citas en el texto "
+        "(no en orden numérico): el frontend muestra las fuentes en ese orden. "
+        "Si ningún fragmento es suficiente, deja "
+        f"'fragmentos_citados' vacío y responde exactamente: "
         f'"{MENSAJE_SIN_NORMATIVIDAD_SFC}"'
     )
 
     client = anthropic.Anthropic()
     response = client.messages.parse(
         model=MODEL_ID,
-        max_tokens=4096,
+        max_tokens=MAX_TOKENS_SFC,
         system=SYSTEM_PROMPT_SFC,
         messages=[{"role": "user", "content": user_message}],
         output_format=_RespuestaAgenteSFC,

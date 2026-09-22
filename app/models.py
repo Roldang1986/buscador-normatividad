@@ -1,7 +1,7 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Boolean, DateTime, Integer, String, Text
+from sqlalchemy import ARRAY, BigInteger, Boolean, Date, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -77,6 +77,48 @@ class DocumentoSFC(Base):
     url_archivo: Mapped[str | None] = mapped_column(Text, nullable=True)
     tiene_texto_completo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     fuente_atribucion: Mapped[str] = mapped_column(Text, nullable=False)
+
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(EMBEDDING_DIM), nullable=True
+    )
+
+
+class NormaCBF(Base):
+    """Tercer corpus (Circular Básica Financiera de la SFC), tabla
+    independiente — ver Ingest/CBF/schema.sql. A diferencia de
+    DocumentoSFC (doctrina, no vinculante) es norma vigente, de obligatorio
+    cumplimiento. Modelo de solo lectura: la ingesta real
+    (Ingest/CBF/ingest_pilot.py) inserta con SQL crudo, no vía este modelo."""
+
+    __tablename__ = "normas_cbf"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    parte: Mapped[int] = mapped_column(Integer, nullable=False)
+    nombre_parte: Mapped[str | None] = mapped_column(Text, nullable=True)
+    numero_capitulo: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nombre_capitulo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seccion: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # "articulo" (texto con embedding) | "anexo_zip" | "reservado" — los dos
+    # últimos no tienen embedding, así que la búsqueda semántica nunca los trae.
+    tipo_registro: Mapped[str] = mapped_column(Text, nullable=False)
+
+    numeral: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id_archivo_cbf: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # "vigente" | "futura" (patrón P2.C9, ver Ingest/CBF/excepcion_p2c9_vigencia.json)
+    version: Mapped[str] = mapped_column(Text, nullable=False)
+
+    fuente: Mapped[str] = mapped_column(Text, nullable=False)
+    url_archivo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    texto: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # "vigente" | "vigencia_futura" | "vigencia_condicionada"
+    estado_vigencia: Mapped[str] = mapped_column(Text, nullable=False)
+    fecha_vigencia_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_vigencia_fin: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nota_vigencia: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(EMBEDDING_DIM), nullable=True

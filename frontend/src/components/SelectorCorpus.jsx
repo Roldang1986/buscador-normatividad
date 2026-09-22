@@ -1,6 +1,6 @@
 const CORPUS = [
   { id: "tributario", etiqueta: "Tributario" },
-  { id: "sfc", etiqueta: "SFC — Doctrina y conceptos" },
+  { id: "sfc", etiqueta: "SFC — Circular Básica Financiera y conceptos" },
 ];
 
 export default function SelectorCorpus({ corpus, onCambiar, disabled }) {
