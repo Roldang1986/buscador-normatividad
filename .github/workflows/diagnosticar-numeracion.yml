@@ -101,6 +101,11 @@ on:
         description: "id(s) de `norma` a auditar con verificar_vigencia_decretos_puntual.py, separados por espacio: compara estado_vigencia/nota_vigencia en BD contra el HTML en vivo de url_fuente (documento completo, no solo los primeros 400 caracteres del artículo). Solo lectura."
         required: false
         default: ""
+      auditar_alcance_notas:
+        description: "Si es 'true', corre auditar_alcance_notas_no_capturadas.py: sobre TODA la tabla `norma` (no red), cuenta filas con notas tipo 'compilado en el'/'NO compilado en el'/'tachado NULO' que VIGENCIA_RE no captura, cuántas quedan mal etiquetadas como vigente, y descubre variantes no anticipadas. Solo lectura."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   diagnostico:
@@ -122,7 +127,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Diagnóstico de numeración (solo lectura, sin BD)
-        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' && github.event.inputs.borrar_fila_id == '' && github.event.inputs.verificar_vigencia_ids == '' }}
+        if: ${{ github.event.inputs.verificar_cobertura_url == '' && github.event.inputs.inspeccionar_busqueda_pregunta == '' && github.event.inputs.diagnosticar_longitud_et != 'true' && github.event.inputs.diagnosticar_colisiones_url == '' && github.event.inputs.corregir_colisiones_url == '' && github.event.inputs.prototipo_fragmentacion_url == '' && github.event.inputs.investigar_numeral_url == '' && github.event.inputs.ejecutar_migracion_alembic != 'true' && github.event.inputs.verificar_fragmentacion_url == '' && github.event.inputs.aplicar_fragmentacion_url == '' && github.event.inputs.borrar_fila_id == '' && github.event.inputs.verificar_vigencia_ids == '' && github.event.inputs.auditar_alcance_notas != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URLS: ${{ github.event.inputs.urls }}
@@ -239,3 +244,9 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           IDS: ${{ github.event.inputs.verificar_vigencia_ids }}
         run: python scripts/verificar_vigencia_decretos_puntual.py $IDS
+
+      - name: Auditar alcance de notas no capturadas por VIGENCIA_RE (solo lectura, con BD)
+        if: ${{ github.event.inputs.auditar_alcance_notas == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/auditar_alcance_notas_no_capturadas.py
