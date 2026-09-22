@@ -6,7 +6,7 @@ from app.embeddings import embed_query
 from app.models import Norma
 
 MODEL_ID = "claude-sonnet-5"
-TOP_K = 5
+TOP_K = 10
 
 MENSAJE_SIN_NORMATIVIDAD = "No encontré normatividad indexada sobre esto."
 
@@ -39,6 +39,20 @@ Reglas estrictas:
    (literales, numerales), transcribe el texto exacto del fragmento entre
    comillas — no los parafrasees ni los resumas, aunque el resto de la
    respuesta sí esté en tus propias palabras.
+7. Cuando cites más de un fragmento, si entre ellos existe una relación
+   jurídica relevante (uno modifica a otro, uno es la regla general y otro
+   la excepción específica, uno fue derogado y reemplazado por otro, hay
+   conflicto aparente de vigencia entre normas de distinta fecha),
+   descríbela explícitamente en la respuesta usando terminología jurídica
+   precisa (norma general/especial, modificación, derogación
+   tácita/expresa, posterioridad).
+
+   Límite estricto: describe la relación, nunca concluyas qué debe hacer
+   el usuario ni des una recomendación de acción. No uses frases como
+   "por lo tanto usted debería", "se recomienda", "lo procedente es". Si
+   la pregunta pide explícitamente una recomendación de acción, aclara
+   que puedes describir el marco normativo aplicable pero no sustituir el
+   criterio profesional de quien consulta.
 """
 
 # Línea fija de aviso del modo discusión — deliberadamente NO se le pide
