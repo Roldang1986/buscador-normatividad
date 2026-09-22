@@ -31,6 +31,10 @@ on:
         description: "Si se pasa, corre contar_fragmentos_por_prefijo_exacto.py: cuenta y lista las filas cuyo url_fuente empiece EXACTAMENTE con este prefijo, sin recortar en '#' (a diferencia de contar_fragmentos_urls). Útil para verificar un artículo puntual ya fragmentado, ej. '.../estatuto_tributario.htm#260-11'. Solo lectura."
         required: false
         default: ""
+      diagnosticar_fragmentacion_alto_nivel_url:
+        description: "Si se pasa, corre diagnosticar_fragmentacion_alto_nivel.py: descarga el documento real (sin numero_articulo) y reporta cuántos fragmentos resultarían de partir SOLO por secciones romanas (II./III./IV.) y 'ANEXO NO. N.', sin bajar a numeral ni a literal — variante más gruesa para documentos como los de '1.8. Orden administrativa' donde la fragmentación fina no es segura. Solo reporte, no toca la BD ni aplica nada."
+        required: false
+        default: ""
 
 jobs:
   verificar:
@@ -48,7 +52,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Verificar cobertura (solo lectura, sin Playwright)
-        if: ${{ github.event.inputs.contar_fragmentos_urls == '' && github.event.inputs.diagnosticar_documento_ingerido_url == '' && github.event.inputs.diagnosticar_fragmentacion_url == '' && github.event.inputs.contar_fragmentos_prefijo_exacto == '' }}
+        if: ${{ github.event.inputs.contar_fragmentos_urls == '' && github.event.inputs.diagnosticar_documento_ingerido_url == '' && github.event.inputs.diagnosticar_fragmentacion_url == '' && github.event.inputs.contar_fragmentos_prefijo_exacto == '' && github.event.inputs.diagnosticar_fragmentacion_alto_nivel_url == '' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           URL_DOCUMENTO: ${{ github.event.inputs.url }}
@@ -88,3 +92,10 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           PREFIJO: ${{ github.event.inputs.contar_fragmentos_prefijo_exacto }}
         run: python scripts/contar_fragmentos_por_prefijo_exacto.py "$PREFIJO"
+
+      - name: Diagnosticar fragmentación por sección de alto nivel (solo reporte, sin BD)
+        if: ${{ github.event.inputs.diagnosticar_fragmentacion_alto_nivel_url != '' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          URL_DOCUMENTO: ${{ github.event.inputs.diagnosticar_fragmentacion_alto_nivel_url }}
+        run: python scripts/diagnosticar_fragmentacion_alto_nivel.py "$URL_DOCUMENTO"
