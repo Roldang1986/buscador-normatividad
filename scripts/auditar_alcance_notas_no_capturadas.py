@@ -123,12 +123,13 @@ def main() -> None:
 
     # Candidatas amplias: cualquier fila con AL MENOS un bracket <...>,
     # para no limitarnos a las palabras clave que ya se nos ocurrieron.
-    candidatas = (
-        db.query(Norma)
-        .filter(Norma.texto.op("~")(r"<[^<>]{1,400}>"))
-        .all()
-    )
-    print(f"Filas con al menos un bracket <...> en `texto`: {len(candidatas)}\n")
+    # Filtro SQL deliberadamente simple (LIKE '%<%'): un regex acotado
+    # como '<[^<>]{1,400}>' dispara "invalid repetition count(s)" en
+    # PostgreSQL, cuyo motor de regex limita {m,n} a RE_DUP_MAX (255 por
+    # defecto) — 400 lo excede. La extracción real de brackets se hace
+    # en Python (BRACKET_RE), que no tiene ese límite.
+    candidatas = db.query(Norma).filter(Norma.texto.like("%<%")).all()
+    print(f"Filas con al menos un '<' en `texto`: {len(candidatas)}\n")
 
     conteo_categorias: Counter[str] = Counter()
     filas_por_categoria: dict[str, list[tuple[Norma, str]]] = defaultdict(list)
