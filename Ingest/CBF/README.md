@@ -400,10 +400,26 @@ del detector), pero sí diluye el embedding y el texto citable.
 Corregirlo exige regenerar texto y embeddings de ~3.034 filas —
 decisión aparte. Corregir también en el código antes de la CBJ.
 
-**Pendiente — `fragmentos_citados` incompleto:** en la prueba de arriba
-la respuesta cita 2.9.3 (que sí estaba en el contexto recuperado) pero
-no lo incluye en `fragmentos_citados`, así que no aparece en `fuentes`.
-No es alucinación; es una omisión en la lista. Sin investigar.
+**`fragmentos_citados` incompleto — investigado y corregido
+(2026-09-28):** en la prueba de arriba la respuesta cita 2.9.3 (que sí
+estaba en el contexto recuperado) pero no aparece en `fuentes`. Causa:
+no es parseo — el código solo descarta índices fuera de rango y la
+salida nunca vino cortada (`stop_reason=end_turn`) —, ni la regla 5: es
+el modelo, que no siempre lista en `fragmentos_citados` todo lo que
+nombra en el texto (repitiendo la misma pregunta 5 veces, 2 corridas
+omitieron un numeral mencionado, a veces de pasada entre paréntesis). La
+instrucción solo pedía "los que respaldan tu respuesta" y dejaba ese
+criterio a juicio del modelo.
+
+Fix en `app/agent.py` (dos capas): (1) el prompt exige listar todo
+fragmento mencionado por numeral o número de documento; (2)
+`_completar_fragmentos_citados` agrega, en orden de aparición, cualquier
+fragmento del contexto cuya etiqueta esté en el texto y falte en la
+lista. Si una etiqueta corresponde a más de un fragmento del contexto
+(mismo numeral vigente y futuro), no se agrega: mejor omitir la tarjeta
+que mostrar la versión equivocada. Verificado: 5/5 corridas seguidas con
+`fuentes` completas; en una el modelo volvió a omitir 2.9.1 pese al
+prompt y lo agregó el código — la capa de código es necesaria.
 
 **Nota para CBJ (paso 7):** el mismo tipo de error de numeración del
 documento fuente puede repetirse ahí — no asumir que la fragmentación

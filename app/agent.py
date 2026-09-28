@@ -1,3 +1,5 @@
+import re
+
 import anthropic
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -313,6 +315,70 @@ def _fuente_dict_sfc(f: DocumentoSFC | NormaCBF) -> dict:
     }
 
 
+def _etiqueta_citable(f: DocumentoSFC | NormaCBF) -> str | None:
+    """Cómo aparece el fragmento citado en el texto de la respuesta: el
+    numeral para la CBF ("2.9.3"), el número de documento para SFC
+    ("2018060742-001", sin los espacios del catálogo). None si no hay una
+    etiqueta con forma de número que se pueda buscar sin falsos positivos
+    (p. ej. "Concepto interno", o un número suelto como "3685")."""
+    if isinstance(f, NormaCBF):
+        etiqueta = f.numeral
+        if etiqueta and re.fullmatch(r"\d+(\.\d+){2,}(-bis)?", etiqueta):
+            return etiqueta
+        return None
+    etiqueta = re.sub(r"\s*-\s*", "-", f.numero_documento or "").strip()
+    return etiqueta if re.fullmatch(r"\d+-\d+", etiqueta) else None
+
+
+def _completar_fragmentos_citados(
+    respuesta: str, fragmentos: list[DocumentoSFC | NormaCBF], citados: list[int]
+) -> list[int]:
+    """El modelo a veces menciona un fragmento en el texto sin incluirlo en
+    `fragmentos_citados` (2 de 5 corridas de la misma pregunta, 2026-09-28):
+    el texto cita "numeral 2.9.3" y la tarjeta no aparece en fuentes. Acá se
+    agrega, en el orden en que aparece en el texto, todo fragmento del
+    contexto cuya etiqueta (_etiqueta_citable) esté en la respuesta y falte
+    en la lista.
+
+    Si una misma etiqueta corresponde a más de un fragmento del contexto (p.
+    ej. el mismo numeral en la versión vigente y la futura de P2.C9), no se
+    agrega ninguno: no hay forma de saber a cuál se refiere el texto, y es
+    preferible omitir la tarjeta a mostrar la versión equivocada. Tampoco se
+    quita nada de lo que el modelo sí listó."""
+    texto = re.sub(r"\s*-\s*", "-", respuesta)
+    etiquetas = [_etiqueta_citable(f) for f in fragmentos]
+
+    def posicion(i: int) -> int | None:
+        etiqueta = etiquetas[i - 1]
+        if etiqueta is None or etiquetas.count(etiqueta) > 1:
+            return None
+        # (?<![\d.]) / (?!\.?\d|-bis): que "2.9.1" no matchee dentro de
+        # "2.9.14", "12.9.1", "2.9.1.2" ni "2.9.1-bis"; el punto final de
+        # "2.9.1." sí se admite.
+        m = re.search(rf"(?<![\d.]){re.escape(etiqueta)}(?!\.?\d|-bis)", texto)
+        return m.start() if m else None
+
+    resultado: list[int] = []
+    for i in citados:
+        if 1 <= i <= len(fragmentos) and i not in resultado:
+            resultado.append(i)
+
+    faltantes = sorted(
+        (pos, i)
+        for i in range(1, len(fragmentos) + 1)
+        if i not in resultado and (pos := posicion(i)) is not None
+    )
+    for pos, i in faltantes:
+        # Se inserta antes del primer citado que aparece más adelante en el
+        # texto, para respetar el orden de aparición que usa el frontend.
+        destino = next(
+            (k for k, j in enumerate(resultado) if (pj := posicion(j)) is not None and pj > pos),
+            len(resultado),
+        )
+        resultado.insert(destino, i)
+    return resultado
+
+
 def responder_pregunta_sfc(db: Session, pregunta: str) -> dict:
     """Punto de entrada del agente RAG para el corpus SFC: busca por separado
     en normas_cbf (norma vigente) y documentos_sfc (doctrina) con el mismo
@@ -340,6 +406,10 @@ def responder_pregunta_sfc(db: Session, pregunta: str) -> dict:
         "prompt. En 'fragmentos_citados' incluye los números (1-based) que "
         "respaldan tu respuesta, en el mismo orden en que los citas en el texto "
         "(no en orden numérico): el frontend muestra las fuentes en ese orden. "
+        "Todo fragmento que menciones en el texto por su numeral o número de "
+        "documento —aunque sea de pasada, dentro de una lista o entre "
+        "paréntesis— debe estar en 'fragmentos_citados'; si no lo usas, no lo "
+        "menciones. "
         "Si ningún fragmento es suficiente, deja "
         f"'fragmentos_citados' vacío y responde exactamente: "
         f'"{MENSAJE_SIN_NORMATIVIDAD_SFC}"'
@@ -355,10 +425,9 @@ def responder_pregunta_sfc(db: Session, pregunta: str) -> dict:
     )
     resultado = response.parsed_output
 
-    fuentes = [
-        _fuente_dict_sfc(fragmentos[i - 1])
-        for i in resultado.fragmentos_citados
-        if 1 <= i <= len(fragmentos)
-    ]
+    citados = _completar_fragmentos_citados(
+        resultado.respuesta, fragmentos, resultado.fragmentos_citados
+    )
+    fuentes = [_fuente_dict_sfc(fragmentos[i - 1]) for i in citados]
 
     return {"respuesta": resultado.respuesta, "fuentes": fuentes}
