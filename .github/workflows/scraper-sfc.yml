@@ -17,7 +17,7 @@ on:
           - af
           - aj
       paginas:
-        description: "Máximo de páginas a recorrer (25 registros/página). 138 cubre las 3.431 de `ac` completas; usar un número chico (ej. 2) para probar antes de lanzar la corrida completa."
+        description: "Página (1-based) en la que TERMINAR, inclusive — número absoluto, no cantidad de páginas desde pagina_inicial (25 registros/página). 138 cubre las 3.431 de `ac` completas. Para probar: pagina_inicial=1, paginas=2. Para retomar en la 110 hasta el final: pagina_inicial=110, paginas=138 (con paginas=10 se detendría tras una sola página)."
         required: false
         default: "138"
       pausa:

@@ -61,7 +61,8 @@ class DocumentoSFC(Base):
 
     __tablename__ = "documentos_sfc"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # BIGSERIAL en Ingest/SFC/schema.sql — mismo tipo que NormaCBF.id.
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
     # "concepto" (doctrina, no vinculante) | "fallo" | "jurisprudencia"
     # (decisión de un caso concreto, vinculante para las partes) — ver

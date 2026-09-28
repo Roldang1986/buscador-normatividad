@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import CajaPregunta from "./components/CajaPregunta";
 import Respuesta from "./components/Respuesta";
 import ModalTexto from "./components/ModalTexto";
@@ -16,17 +16,32 @@ export default function App() {
   const [documentoModal, setDocumentoModal] = useState(null);
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const { historial, agregar, borrar } = useHistorial();
+  // Corpus vigente en pantalla, legible desde una consulta ya en curso: el
+  // Historial sigue activo mientras `cargando` y puede cambiar el corpus
+  // antes de que llegue la respuesta.
+  const corpusActual = useRef(corpus);
+  corpusActual.current = corpus;
 
   async function manejarConsulta(pregunta) {
+    const corpusConsulta = corpus;
     setCargando(true);
     setError(null);
     try {
       const datos =
-        corpus === "sfc" ? await consultarPreguntaSFC(pregunta) : await consultarPregunta(pregunta);
-      setResultado(datos);
-      agregar(pregunta, datos, corpus);
+        corpusConsulta === "sfc"
+          ? await consultarPreguntaSFC(pregunta)
+          : await consultarPregunta(pregunta);
+      // La respuesta se guarda igual en el historial, con su corpus, pero no
+      // se muestra si el usuario ya cambió de corpus: pisaría la pantalla con
+      // fuentes de la forma equivocada (con/sin `origen`).
+      agregar(pregunta, datos, corpusConsulta);
+      if (corpusActual.current === corpusConsulta) {
+        setResultado(datos);
+      }
     } catch (err) {
-      setError(err.message);
+      if (corpusActual.current === corpusConsulta) {
+        setError(err.message);
+      }
     } finally {
       setCargando(false);
     }
