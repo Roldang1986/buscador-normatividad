@@ -4,8 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       pregunta:
-        description: "Pregunta a probar contra POST /consulta"
-        required: true
+        description: "Pregunta a probar contra POST /consulta (ignorado si preguntas_control=true)"
+        required: false
+        default: ""
+      preguntas_control:
+        description: "Si se pasa, en vez de la pregunta suelta corre scripts/verificar_preguntas_control.py: el set fijo de preguntas de regresión (ver ese archivo) contra /consulta, y falla el job si alguna deja de citar la fuente esperada. Solo lectura, no modifica la BD."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   consulta:
@@ -28,7 +34,14 @@ jobs:
         run: alembic upgrade head
 
       - name: Consulta ad hoc
+        if: ${{ github.event.inputs.preguntas_control != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           PREGUNTA: ${{ github.event.inputs.pregunta }}
         run: python scripts/consulta_ad_hoc.py "$PREGUNTA"
+
+      - name: Verificar preguntas de control (solo lectura, con BD)
+        if: ${{ github.event.inputs.preguntas_control == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/verificar_preguntas_control.py
