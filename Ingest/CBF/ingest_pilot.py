@@ -73,6 +73,25 @@ _MESES_ES = {
     "julio": 7, "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10,
     "noviembre": 11, "diciembre": 12,
 }
+# Línea de encabezado del preámbulo de un capítulo: todo en mayúsculas
+# ("CAPÍTULO 9", "INTRODUCCIÓN") o "Parte/Capítulo/Sección/Título N..." en
+# minúsculas (así viene el .docx vigente de P2.C9). Ver _es_linea_encabezado.
+_RE_LINEA_ENCABEZADO = re.compile(
+    r"^(?:[^a-záéíóúüñ]+|(?:Parte|Cap[ií]tulo|Secci[oó]n|T[ií]tulo)\b.*)$"
+)
+
+
+def _es_linea_encabezado(linea: str) -> bool:
+    """Encabezado (no prosa) del preámbulo: además de _RE_LINEA_ENCABEZADO,
+    un subtítulo corto en minúsculas sin punto final ("Ámbito de
+    aplicación", "Régimen patrimonial" en P2.C6/P2.C2). La prosa real vista
+    en preámbulos es la nota "Este capítulo fue expedido mediante la
+    Circular Externa…", muy por encima de 8 palabras."""
+    linea = linea.strip()
+    return bool(_RE_LINEA_ENCABEZADO.match(linea)) or (
+        len(linea.split()) <= 8 and not linea.endswith(".")
+    )
+
 _RE_FECHA_ES = re.compile(r"(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})", re.IGNORECASE)
 
 
@@ -160,19 +179,28 @@ def _fragmentar_por_numeral(texto: str, prefijo: str) -> list[tuple[str | None, 
     numeración interna que de otro modo se cuentan como numerales
     (bug real encontrado en el dry-run, ver README). Sin ningún numeral
     detectado, devuelve el texto completo como fragmento único
-    (numeral=None) en vez de perder el contenido."""
+    (numeral=None) en vez de perder el contenido.
+
+    El preámbulo (todo lo anterior al primer numeral) NO se antepone a cada
+    fragmento: hasta 2026-09-28 sí se hacía, y cada numeral cargaba el
+    título del capítulo y, en algunos, la nota de expedición repetida (ver
+    README, "Preámbulo repetido"). Ahora, si el preámbulo es solo
+    encabezados se descarta (ya están en `fuente`); si tiene prosa (p. ej.
+    "Este capítulo fue expedido mediante la Circular Externa…", que en P1.C4
+    y P2.C12 no está en nota_vigencia) va como fragmento propio con
+    numeral=None, primero, para no perderlo."""
     posiciones = scraper.posiciones_numerales(texto, prefijo)
 
     if not posiciones:
         return [(None, texto)]
 
-    preambulo = texto[: posiciones[0][0]].strip()
     fragmentos: list[tuple[str | None, str]] = []
+    preambulo = texto[: posiciones[0][0]].strip()
+    if any(l.strip() and not _es_linea_encabezado(l) for l in preambulo.split("\n")):
+        fragmentos.append((None, preambulo))
     for i, (pos, etiqueta) in enumerate(posiciones):
         fin = posiciones[i + 1][0] if i + 1 < len(posiciones) else len(texto)
-        cuerpo = texto[pos:fin].strip()
-        texto_fragmento = f"{preambulo}\n\n{cuerpo}" if preambulo else cuerpo
-        fragmentos.append((etiqueta, texto_fragmento))
+        fragmentos.append((etiqueta, texto[pos:fin].strip()))
     return fragmentos
 
 

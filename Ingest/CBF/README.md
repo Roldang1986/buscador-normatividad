@@ -388,17 +388,43 @@ contiene su texto, sin numerales duplicados. `normas_cbf` queda en
 2.9.14 vigente y 2.9.2 futura por separado, advirtiendo que la segunda
 rige desde 2028.
 
-**Pendiente — preámbulo repetido (sin re-ingest por ahora):**
-`_fragmentar_por_numeral` sigue anteponiendo a **cada** fragmento todo el
-texto anterior al primer numeral del archivo. Con el fix de arriba, en
-P2.C9 futura ya es solo el título ("PARTE 2 … CAPÍTULO 9 … INTRODUCCIÓN",
-~110 caracteres), pero en el resto del corpus afecta 3.003 filas
-(promedio 280 caracteres, hasta 1.009; ~33% del texto almacenado),
-p. ej. P2.C3 repite la nota de vigencia 4 veces en cada fragmento. Es
-ruido y no hay contenido de otro numeral mal atribuido (eso era el bug
-del detector), pero sí diluye el embedding y el texto citable.
-Corregirlo exige regenerar texto y embeddings de ~3.034 filas —
-decisión aparte. Corregir también en el código antes de la CBJ.
+**Preámbulo repetido — corregido en código, NO en Neon (2026-09-28):**
+hasta este fix, `_fragmentar_por_numeral` anteponía a **cada** fragmento
+todo el texto anterior al primer numeral del archivo (título del
+capítulo y, en algunos, la nota de expedición repetida — P2.C3 la traía
+4 veces en cada numeral): 3.003 filas afectadas, promedio 280
+caracteres, hasta 1.009, ~33% del texto almacenado en `normas_cbf`.
+
+Fix en `ingest_pilot.py`: el preámbulo ya no se antepone. Si es solo
+encabezados (`_es_linea_encabezado`: mayúsculas, "Parte/Capítulo/…", o
+subtítulo corto sin punto final) se descarta, porque esa información ya
+está en `fuente`. Si tiene prosa va como fragmento propio con
+`numeral=None`, primero. En la CBF eso pasa en 6 archivos, todos con la
+nota "Este capítulo fue expedido mediante la Circular Externa…" (P1.C4
+secciones 1 y 2, P2.C3, P2.C11, P2.C12, P3.C8); en P1.C4 y P2.C12 esa
+nota no está en `nota_vigencia`, así que descartarla la perdería. Aplica
+también a la CBJ (paso 7).
+
+Verificado en seco sobre los 62 archivos (sin Voyage ni escritura): el
+código nuevo produce los mismos 3.034 numerales que hay en Neon, y el
+texto de cada uno es exactamente el de Neon sin el preámbulo (0
+diferencias); más 6 filas de preámbulo propio → 3.040 filas `articulo`.
+
+**⚠ Código y datos desalineados hasta el próximo re-ingest completo.**
+Por decisión explícita, las filas en Neon **no** se regeneraron:
+- 3.003 filas `articulo` en Neon siguen con el preámbulo antepuesto (y
+  su embedding calculado sobre ese texto); el código actual las
+  generaría sin él.
+- Las 6 filas de preámbulo propio (`numeral=None`) no existen en Neon.
+- Excepción: P2.C9 futura (`idFile=1081457`, 30 filas) se reprocesó con
+  el fix del detector, pero todavía con el preámbulo antepuesto (~110
+  caracteres de título) — también desalineada.
+- Ojo: `ingest_pilot.py` inserta con `ON CONFLICT DO NOTHING`, así que
+  correrlo encima de lo que hay **no** reemplaza el texto de las filas
+  existentes (solo agregaría las 6 de preámbulo). El re-ingest real
+  exige borrar y reinsertar `normas_cbf` (o hacer `UPDATE` de `texto` +
+  `embedding`), ~3.040 llamadas a Voyage — hacerlo cuando se decida un
+  re-ingest completo por otra razón.
 
 **`fragmentos_citados` incompleto — investigado y corregido
 (2026-09-28):** en la prueba de arriba la respuesta cita 2.9.3 (que sí
