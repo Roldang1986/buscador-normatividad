@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      proponer_captura_nota_vigencia:
+        description: "Si se pasa, en vez de la pregunta suelta corre scripts/proponer_captura_nota_vigencia.py: dry-run de solo lectura que mide el alcance de capturar nota_vigencia para las notas 'compilado en'/'NO compilado en'/'tachado NULO'/'sustituido'/'condicionalmente exequible' y muestra ejemplos completos. No escribe nada en la BD."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   consulta:
@@ -34,7 +39,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Consulta ad hoc
-        if: ${{ github.event.inputs.preguntas_control != 'true' }}
+        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.proponer_captura_nota_vigencia != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           PREGUNTA: ${{ github.event.inputs.pregunta }}
@@ -45,3 +50,9 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/verificar_preguntas_control.py
+
+      - name: Proponer captura de nota_vigencia (DRY RUN, solo lectura, con BD)
+        if: ${{ github.event.inputs.proponer_captura_nota_vigencia == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/proponer_captura_nota_vigencia.py
