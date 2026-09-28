@@ -13,10 +13,19 @@ on:
         type: boolean
         default: false
       proponer_captura_nota_vigencia:
-        description: "Si se pasa, en vez de la pregunta suelta corre scripts/proponer_captura_nota_vigencia.py: dry-run de solo lectura que mide el alcance de capturar nota_vigencia para las notas 'compilado en'/'NO compilado en'/'tachado NULO'/'sustituido'/'condicionalmente exequible' y muestra ejemplos completos. No escribe nada en la BD."
+        description: "Si se pasa, en vez de la pregunta suelta corre scripts/proponer_captura_nota_vigencia.py: dry-run de solo lectura que mide el alcance de capturar nota_vigencia para las notas 'compilado en'/'NO compilado en'/'tachado NULO'/'sustituido'/'condicionalmente exequible' y muestra ejemplos completos + una muestra antes/después. No escribe nada en la BD."
         required: false
         type: boolean
         default: false
+      aplicar_captura_nota_vigencia:
+        description: "MODO DE ESCRITURA: corre scripts/aplicar_captura_nota_vigencia.py, que SÍ escribe nota_vigencia (combinando si ya había texto, nunca sobrescribiendo) para las ~3231 filas encontradas. No toca estado_vigencia. Requiere aplicar_captura_nota_vigencia_confirmar='APLICAR' — si no coincide exactamente, el paso se omite sin escribir nada."
+        required: false
+        type: boolean
+        default: false
+      aplicar_captura_nota_vigencia_confirmar:
+        description: "Debe ser exactamente 'APLICAR' (mayúsculas) para que aplicar_captura_nota_vigencia realmente escriba en la BD — verificación de seguridad, no una confirmación real de respaldo en Neon."
+        required: false
+        default: ""
 
 jobs:
   consulta:
@@ -39,7 +48,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Consulta ad hoc
-        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.proponer_captura_nota_vigencia != 'true' }}
+        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.proponer_captura_nota_vigencia != 'true' && github.event.inputs.aplicar_captura_nota_vigencia != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           PREGUNTA: ${{ github.event.inputs.pregunta }}
@@ -56,3 +65,9 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/proponer_captura_nota_vigencia.py
+
+      - name: Aplicar captura de nota_vigencia (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.aplicar_captura_nota_vigencia == 'true' && github.event.inputs.aplicar_captura_nota_vigencia_confirmar == 'APLICAR' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/aplicar_captura_nota_vigencia.py
