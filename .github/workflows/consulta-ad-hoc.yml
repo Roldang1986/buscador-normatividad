@@ -26,6 +26,10 @@ on:
         description: "Debe ser exactamente 'APLICAR' (mayúsculas) para que aplicar_captura_nota_vigencia realmente escriba en la BD — verificación de seguridad, no una confirmación real de respaldo en Neon."
         required: false
         default: ""
+      proponer_captura_nota_vigencia_ids:
+        description: "id(s) puntuales separados por espacio para la Parte 4 de proponer_captura_nota_vigencia.py (ej. '2240 289 18551'). Si se deja vacío, usa las primeras N filas por defecto."
+        required: false
+        default: ""
 
 jobs:
   consulta:
@@ -64,7 +68,13 @@ jobs:
         if: ${{ github.event.inputs.proponer_captura_nota_vigencia == 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python scripts/proponer_captura_nota_vigencia.py
+          IDS: ${{ github.event.inputs.proponer_captura_nota_vigencia_ids }}
+        run: |
+          if [ -n "$IDS" ]; then
+            python scripts/proponer_captura_nota_vigencia.py --ids "$IDS"
+          else
+            python scripts/proponer_captura_nota_vigencia.py
+          fi
 
       - name: Aplicar captura de nota_vigencia (MODO DE ESCRITURA, con BD)
         if: ${{ github.event.inputs.aplicar_captura_nota_vigencia == 'true' && github.event.inputs.aplicar_captura_nota_vigencia_confirmar == 'APLICAR' }}

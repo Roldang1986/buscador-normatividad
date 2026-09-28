@@ -54,7 +54,14 @@ LIMITE_CHARS_EJEMPLO = 6000  # cap de seguridad para artículos diluidos, no el 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--muestra", type=int, default=N_MUESTRA_ANTES_DESPUES)
+    parser.add_argument(
+        "--ids",
+        type=str,
+        default="",
+        help="id(s) puntuales separados por espacio para la Parte 4 (en vez de las primeras --muestra filas)",
+    )
     args = parser.parse_args()
+    ids_puntuales = [int(x) for x in args.ids.split()] if args.ids.strip() else None
 
     db = SessionLocal()
 
@@ -106,8 +113,19 @@ def main() -> None:
                 print(f"  texto completo ({len(texto_completo)} chars):")
                 print(f"    {texto_completo!r}")
 
-    print(f"\n=== Parte 4: muestra antes/después ({args.muestra} filas, SIN escribir) ===\n")
-    for norma, notas_nuevas in list(filas_afectadas.values())[: args.muestra]:
+    if ids_puntuales:
+        muestra = []
+        for norma_id in ids_puntuales:
+            if norma_id in filas_afectadas:
+                muestra.append(filas_afectadas[norma_id])
+            else:
+                print(f"  ADVERTENCIA: id={norma_id} no está entre las filas afectadas (sin notas nuevas que capturar).")
+        print(f"\n=== Parte 4: muestra antes/después (ids puntuales: {args.ids}, SIN escribir) ===\n")
+    else:
+        muestra = list(filas_afectadas.values())[: args.muestra]
+        print(f"\n=== Parte 4: muestra antes/después ({args.muestra} filas, SIN escribir) ===\n")
+
+    for norma, notas_nuevas in muestra:
         nota_final = calcular_nota_final(norma.nota_vigencia, notas_nuevas)
         print(f"  id={norma.id} — {norma.fuente}")
         print(f"    estado_vigencia (sin cambios): {norma.estado_vigencia!r}")
