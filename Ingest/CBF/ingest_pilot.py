@@ -161,14 +161,7 @@ def _fragmentar_por_numeral(texto: str, prefijo: str) -> list[tuple[str | None, 
     (bug real encontrado en el dry-run, ver README). Sin ningún numeral
     detectado, devuelve el texto completo como fragmento único
     (numeral=None) en vez de perder el contenido."""
-    lineas = texto.split("\n")
-    posiciones: list[tuple[int, str]] = []
-    offset = 0
-    for linea in lineas:
-        l = linea.strip()
-        if scraper._RE_NUMERAL_LINEA.match(l) and l.startswith(prefijo):
-            posiciones.append((offset, l.rstrip(".")))
-        offset += len(linea) + 1  # +1 por el "\n" que junta las líneas
+    posiciones = scraper.posiciones_numerales(texto, prefijo)
 
     if not posiciones:
         return [(None, texto)]

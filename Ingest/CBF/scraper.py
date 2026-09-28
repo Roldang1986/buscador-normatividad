@@ -116,6 +116,53 @@ _RE_ANEXO = re.compile(r"^Anexos?(\s+\d+)?$", re.IGNORECASE)
 # prototipo_fragmentacion_numeral_cbf.py:_numerales_y_fragmentos.
 _RE_NUMERAL_LINEA = re.compile(r"^\d{1,2}(\.\d{1,3}){2,4}\.?$")
 
+# Segunda forma real del marcador: el numeral al FINAL de una línea, pegado
+# (con espacio o \xa0) a un encabezado en mayúsculas — a veces con el
+# párrafo anterior en la misma línea. Visto en la versión futura de P2.C9
+# (excepcion_p2c9_vigencia.json), donde 10 de sus 30 numerales vienen así y
+# _RE_NUMERAL_LINEA no los veía (bug real, 2026-09-28, ver README):
+#   "INTRODUCCIÓN\xa02.9.1."
+#   "…escenario.\xa0PRUEBAS DE RESISTENCIA INVERSAS\xa02.9.19."
+#   "…entorno económico y sectorial.GOBIERNO DEL EPR\xa02.9.25."
+# Lo que lo distingue de una referencia dentro del texto ("…del párrafo
+# 2.9.30. del presente Capítulo") es el encabezado en mayúsculas justo
+# antes y que el numeral cierra la línea. El encabezado debe empezar en un
+# límite de palabra y tener al menos 4 letras, para no tomar una sigla
+# suelta ("…la SFC 2.9.3.") como encabezado.
+_RE_NUMERAL_FIN_ENCABEZADO = re.compile(
+    r"(?<![A-Za-zÁÉÍÓÚÜÑáéíóúüñ])"
+    r"(?P<encabezado>[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9 \xa0,()«»\-–]*?)\s+"
+    r"(?P<numeral>\d{1,2}(?:\.\d{1,3}){2,4})\.?$"
+)
+
+
+def posiciones_numerales(texto: str, prefijo: str) -> list[tuple[int, str]]:
+    """[(offset en `texto` donde empieza el marcador, numeral sin punto
+    final)] en orden de aparición. Reconoce las dos formas del marcador:
+    línea propia ("2.9.3.") y final de línea tras un encabezado en
+    mayúsculas ("INTRODUCCIÓN 2.9.1."). Solo cuenta un marcador que empieza
+    con `prefijo` ("{parte}.{capitulo}.") — ver el OJO de arriba sobre las
+    tablas de taxonomía con numeración propia. Pensada para reutilizarse
+    tal cual en la CBJ (paso 7)."""
+    posiciones: list[tuple[int, str]] = []
+    offset = 0
+    for linea in texto.split("\n"):
+        l = linea.strip()
+        inicio_l = offset + (len(linea) - len(linea.lstrip()))
+        if _RE_NUMERAL_LINEA.match(l):
+            if l.startswith(prefijo):
+                posiciones.append((inicio_l, l.rstrip(".")))
+        else:
+            m = _RE_NUMERAL_FIN_ENCABEZADO.search(l)
+            if (
+                m
+                and m.group("numeral").startswith(prefijo)
+                and sum(c.isalpha() for c in m.group("encabezado")) >= 4
+            ):
+                posiciones.append((inicio_l + m.start("numeral"), m.group("numeral")))
+        offset += len(linea) + 1  # +1 por el "\n" que junta las líneas
+    return posiciones
+
 
 @dataclass
 class ArchivoCBF:

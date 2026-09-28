@@ -265,7 +265,10 @@ Hallazgos sobre el contenido real (para calibrar `ingest_pilot.py`):
   de reporte — la diferencia esperada está en P2.C9 futura, cuyo texto
   viene del JSON verificado a mano en vez de derivarse en vivo; no se
   investigó numeral por numeral, la escala de la diferencia es
-  consistente con esa única fuente distinta).
+  consistente con esa única fuente distinta). **Corrección 2026-09-28:**
+  esa explicación era incorrecta — la diferencia de 10 era un bug del
+  detector de numerales, ver "Detector de numerales en línea de
+  encabezado" más abajo.
 ## Ingesta real (2026-09-22)
 
 `schema.sql` se aplicó en Neon (ya era idempotente desde el inicio —
@@ -344,6 +347,63 @@ CBF vigente, advertir que ya no rige y que el criterio puede estar
 desactualizado, basándose solo en el texto de los fragmentos. Verificado:
 la advertencia aparece tanto en preguntas doctrinales como normativas, y el
 orden norma/concepto se mantiene.
+
+## Detector de numerales en línea de encabezado (2026-09-28)
+
+Hallazgo de la revisión de código (`/code-review ultra`): en la versión
+futura de P2.C9 (`idFile=1081457`, texto de
+`excepcion_p2c9_vigencia.json`) 10 de sus 30 numerales no van en línea
+propia sino al final de una línea, pegados a un encabezado en mayúsculas
+— a veces con el párrafo anterior en la misma línea:
+`"INTRODUCCIÓN\xa02.9.1."`, `"…sectorial.GOBIERNO DEL EPR\xa02.9.25."`.
+`_RE_NUMERAL_LINEA` solo reconocía la forma en línea propia, así que
+2.9.1, 2.9.2, 2.9.5, 2.9.17-20, 2.9.23, 2.9.25 y 2.9.26 no existían como
+filas: su texto quedaba pegado al numeral anterior, y el de 2.9.1 y
+2.9.2 (introducción y ámbito de aplicación) entraba al preámbulo y se
+repetía en **las 20 filas** del archivo — p. ej. 2.9.9 llevaba el ámbito
+de aplicación completo como si fuera suyo.
+
+**Fix en código:** `scraper.posiciones_numerales(texto, prefijo)` reconoce
+ambas formas (línea propia, y numeral que cierra la línea tras un
+encabezado en mayúsculas de ≥4 letras); una referencia dentro del texto
+("…del párrafo 2.9.20. del presente Capítulo") no cuenta, porque no va
+precedida de encabezado ni cierra la línea. `_fragmentar_por_numeral` la
+usa, y es la función a reutilizar para la CBJ. (`prototipo_fragmentacion_
+numeral_cbf.py` sigue con la detección vieja: es solo el reporte
+histórico del dry-run, no se usa en la ingesta.)
+
+**Verificado en seco sobre los 62 archivos (sin Voyage ni escritura):**
+el detector nuevo solo cambia P2.C9 futura (20 → 30 fragmentos, 2.9.1 a
+2.9.30 en orden, sin duplicados); los otros 61 archivos dan exactamente
+el mismo número de filas que ya hay en Neon. Total: 3.034 — igual a los
+3.034 numerales del dry-run de reporte.
+
+**Reproceso solo de ese archivo en Neon:** en una sola transacción, se
+borraron sus 20 filas y se insertaron las 30 nuevas con embedding (ids
+3396-3425), todas `vigencia_futura` con la fecha 2028-01-01 y la nota del
+JSON. Verificado: 2.9.1 y 2.9.2 son filas propias, ningún otro numeral
+contiene su texto, sin numerales duplicados. `normas_cbf` queda en
+3.045 filas (3.034 `articulo`, todas con embedding; 10 `anexo_zip`; 1
+`reservado`). Prueba end-to-end: "¿a qué entidades aplica el EPR?" cita
+2.9.14 vigente y 2.9.2 futura por separado, advirtiendo que la segunda
+rige desde 2028.
+
+**Pendiente — preámbulo repetido (sin re-ingest por ahora):**
+`_fragmentar_por_numeral` sigue anteponiendo a **cada** fragmento todo el
+texto anterior al primer numeral del archivo. Con el fix de arriba, en
+P2.C9 futura ya es solo el título ("PARTE 2 … CAPÍTULO 9 … INTRODUCCIÓN",
+~110 caracteres), pero en el resto del corpus afecta 3.003 filas
+(promedio 280 caracteres, hasta 1.009; ~33% del texto almacenado),
+p. ej. P2.C3 repite la nota de vigencia 4 veces en cada fragmento. Es
+ruido y no hay contenido de otro numeral mal atribuido (eso era el bug
+del detector), pero sí diluye el embedding y el texto citable.
+Corregirlo exige regenerar texto y embeddings de ~3.034 filas —
+decisión aparte. Corregir también en el código antes de la CBJ.
+
+**Pendiente — `fragmentos_citados` incompleto:** en la prueba de arriba
+la respuesta cita 2.9.3 (que sí estaba en el contexto recuperado) pero
+no lo incluye en `fragmentos_citados`, así que no aparece en `fuentes`.
+No es alucinación; es una omisión en la lista. Sin investigar.
 
 **Nota para CBJ (paso 7):** el mismo tipo de error de numeración del
 documento fuente puede repetirse ahí — no asumir que la fragmentación
