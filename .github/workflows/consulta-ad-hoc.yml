@@ -30,6 +30,11 @@ on:
         description: "id(s) puntuales separados por espacio para la Parte 4 de proponer_captura_nota_vigencia.py (ej. '2240 289 18551'). Si se deja vacío, usa las primeras N filas por defecto."
         required: false
         default: ""
+      verificar_sustituido_condicionalmente:
+        description: "Si se pasa, corre scripts/verificar_sustituido_y_condicionalmente.py: solo lectura, verifica el patrón real de las notas 'sustituido' (¿reemplazo total de texto, como 'modificado'?) y cuenta/muestra las filas 'condicionalmente exequible'. No escribe nada."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   consulta:
@@ -52,7 +57,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Consulta ad hoc
-        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.proponer_captura_nota_vigencia != 'true' && github.event.inputs.aplicar_captura_nota_vigencia != 'true' }}
+        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.proponer_captura_nota_vigencia != 'true' && github.event.inputs.aplicar_captura_nota_vigencia != 'true' && github.event.inputs.verificar_sustituido_condicionalmente != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           PREGUNTA: ${{ github.event.inputs.pregunta }}
@@ -81,3 +86,9 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/aplicar_captura_nota_vigencia.py
+
+      - name: Verificar patrón sustituido y condicionalmente exequible (solo lectura, con BD)
+        if: ${{ github.event.inputs.verificar_sustituido_condicionalmente == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/verificar_sustituido_y_condicionalmente.py
