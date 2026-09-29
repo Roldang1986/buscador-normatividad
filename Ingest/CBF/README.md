@@ -18,6 +18,22 @@ para que el plan quede en disco y sobreviva a un reinicio de sesión.
 hay ningún API dinámico: es una página CMS estática normal, igual de
 simple que el mecanismo de `app/ingest/dian_scraper.py`. Confirmado:
 
+> **Actualización (2026-09-29): `apiCbf` sí existe, pero no compite con
+> el mecanismo de arriba.** Está definido en el bundle Angular del
+> visualizador de la CBJ (`/visualizadorCBJ/main.js`, `CBF_ENPOINT =
+> serviceHost + '/apiCbf'`, con `capituloXParteBorrador`, `download-zip`,
+> etc.) y responde 200 con el header `api-key` estático del visualizador
+> (`.../sfcservices/api-circular-basica/api-circular-basica/apiCbf/...`).
+> Verificado en vivo: `consultarPartesActivas/1` devuelve solo metadata
+> de la Parte (título, fechas, `descripcion: "N/A"`), y
+> `capituloXParteBorrador/1` devuelve los 4 capítulos de la Parte 1 con
+> `descripcion` vacía — índice + notas de vigencia (P1.C4 trae la suya),
+> sin texto narrativo a nivel de capítulo. No se revisaron los niveles
+> inferiores (sección/agrupador) ni `download-zip` de `apiCbf`. Lo de
+> 2026-09-22 ("no existen") fue una conclusión errada sobre la existencia
+> del API; la página CMS + `.docx` vía `loader.php` sigue siendo la
+> fuente usada y verificada, y no se cambia.
+
 - Las 4 Partes completas (con sus capítulos y secciones) viven en **una
   sola página**: `.../publicaciones/10116084/circular-basica-financiera-
   circular-externa-004-de-2026/`, como una tabla HTML con jerarquía
