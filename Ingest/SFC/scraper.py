@@ -258,16 +258,35 @@ def extraer_texto_archivo(contenido: bytes) -> tuple[str | None, str | None]:
 
 
 def raspar_coleccion(
-    coleccion: str, max_paginas: int, dry_run: bool, pausa: float = 1.0
-) -> list[dict]:
+    coleccion: str,
+    max_paginas: int,
+    dry_run: bool,
+    pausa: float = 1.0,
+    pagina_inicial: int = 1,
+):
     """Recorre la colección en páginas de `RESULTADOS_POR_PAGINA` registros,
     avanzando `desde` por POST (ver `obtener_pagina`). Se detiene cuando:
-      - se alcanza `max_paginas`,
+      - se alcanza `max_paginas` (número de página absoluto, no cantidad de
+        páginas recorridas en esta invocación — ver `pagina_inicial`),
       - una página ya no trae registros, o
       - `desde` supera el total de registros reportado por el sitio.
     No confía en los offsets del paginador de la página 1 más allá del
     tamaño de página fijo (ver nota de paginación en el docstring del
     módulo): siempre avanza en incrementos de `RESULTADOS_POR_PAGINA`.
+
+    Es un generador — yield de `(pagina_num, registros_de_esa_pagina)` por
+    página en vez de devolver todo en una lista al final. Así el caller
+    (`ingest_pilot.py`) puede embeber+insertar y hacer commit página por
+    página en vez de esperar a rasear las `max_paginas` completas: una
+    corrida de 138 páginas puede tardar más de una hora entre red +
+    extracción de texto, y si el proceso se cancela o falla a mitad de
+    camino antes de este cambio se perdía todo lo raspado hasta ese punto,
+    no solo lo no insertado (ver corrida cancelada en página 110,
+    2026-09-16, README).
+
+    `pagina_inicial` (1-based) permite retomar una corrida desde una
+    página puntual sin volver a rasear/descargar/embeber las páginas ya
+    confirmadas en una corrida anterior.
     """
     if not dry_run and shutil.which("antiword") is None:
         print(
@@ -277,10 +296,9 @@ def raspar_coleccion(
         )
 
     session = requests.Session()
-    resultado: list[dict] = []
 
-    desde = 1
-    pagina_num = 0
+    desde = (pagina_inicial - 1) * RESULTADOS_POR_PAGINA + 1
+    pagina_num = pagina_inicial - 1
     total_registros: int | None = None
 
     while True:
@@ -296,6 +314,7 @@ def raspar_coleccion(
 
         pagina_num += 1
         print(f"  página {pagina_num} (desde={desde}): {len(registros)} registros")
+        pagina_resultado: list[dict] = []
         for r in registros:
             registro_dict = asdict(r)
             if not dry_run and r.tipo_archivo == "texto" and r.url_archivo:
@@ -312,7 +331,9 @@ def raspar_coleccion(
                     registro_dict["texto_completo"] = texto
                     registro_dict["tiene_texto_completo"] = texto is not None
                     registro_dict["motivo_sin_texto"] = motivo
-            resultado.append(registro_dict)
+            pagina_resultado.append(registro_dict)
+
+        yield pagina_num, pagina_resultado
 
         if pagina_num >= max_paginas:
             break
@@ -320,8 +341,6 @@ def raspar_coleccion(
         if total_registros is not None and desde > total_registros:
             break
         time.sleep(pausa)
-
-    return resultado
 
 
 def main():
@@ -339,9 +358,19 @@ def main():
         action="store_true",
         help="Solo parsea metadatos, no descarga archivos de texto completo.",
     )
+    ap.add_argument(
+        "--pagina-inicial",
+        type=int,
+        default=1,
+        help="Página (1-based) por la que empezar, para retomar una corrida.",
+    )
     args = ap.parse_args()
 
-    registros = raspar_coleccion(args.coleccion, args.paginas, args.dry_run, args.pausa)
+    registros: list[dict] = []
+    for _pagina_num, pagina_registros in raspar_coleccion(
+        args.coleccion, args.paginas, args.dry_run, args.pausa, args.pagina_inicial
+    ):
+        registros.extend(pagina_registros)
     print(f"\n{len(registros)} registros procesados de la colección '{args.coleccion}'.")
     for r in registros[:3]:
         print("-" * 60)

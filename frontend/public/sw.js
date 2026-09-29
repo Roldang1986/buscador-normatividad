@@ -4,7 +4,7 @@
 // respuestas normativas siempre deben ir a la red, nunca servirse
 // cacheadas.
 
-const CACHE_NAME = "buscador-normatividad-v1";
+const CACHE_NAME = "buscador-normatividad-v2";
 
 self.addEventListener("install", () => {
   self.skipWaiting();

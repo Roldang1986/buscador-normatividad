@@ -111,15 +111,209 @@ Confirmar esto contra el entorno de despliegue real antes de escalar.
   `fuente_atribucion` en `schema.sql`/`ingest_pilot.py` **tenía el prefijo
   "Fuente: " faltante** respecto a la cita exigida — corregido.
 
-## Pendiente antes de escalar a las ~750 páginas totales
+## Corrida real cancelada en página 110 (2026-09-16, run 35153542138)
 
+Se lanzó la ingesta completa de `ac` (138 páginas) vía `scraper-sfc.yml` y
+se canceló manualmente tras llegar a la página 111 (~2.775 registros
+raspados). Verificado post-mortem contra Neon y el log del run:
+
+- **`documentos_sfc` sigue en 100 registros**, todos con `embedding` no
+  nulo y `texto_completo` completo — cero registros nulos o a medias.
+  Esos 100 son de una corrida piloto local anterior (`creado_en` entre
+  15:38:31 y 15:39:53 UTC), **no** de esta corrida cancelada: en ese
+  momento `ingest_pilot.py` envolvía el loop completo de embed+insert de
+  *todas* las páginas raspadas en una sola transacción
+  (`with engine.begin() as conn:`), así que cancelar el job a mitad de
+  camino hacía rollback atómico — no podía quedar un insert parcial ni un
+  embedding nulo, pero tampoco quedaba nada del progreso raspado. **Fix
+  aplicado (2026-09-16):** `raspar_coleccion` ahora es un generador que
+  yieldea página por página, y `ingestar_pilotos` hace `engine.begin()` +
+  commit por página en vez de para toda la corrida — una cancelación
+  tardía pierde como mucho una página (~25 registros), no horas de
+  trabajo. Además se agregó `--pagina-inicial` (y el input
+  `pagina_inicial` en `scraper-sfc.yml`) para retomar una corrida desde
+  la página siguiente a la última confirmada, sin volver a
+  rasear/descargar/embeber lo ya insertado. La última página confirmada
+  se identifica por la línea `página N: commit OK` en el log de la
+  corrida anterior.
+- **`antiword` confirmado funcionando en ejecución real**, no solo
+  instalado: `scraper.py` chequea `shutil.which("antiword")` en tiempo de
+  ejecución y loggea si falta — ese warning no apareció en el log; y de
+  los ~2.775 registros procesados (incluyendo años `doc_ole`) hubo cero
+  líneas de `extraccion_fallida`, solo 13 fallos de descarga (500/502/404/
+  DNS, capa de red, no de extracción). El punto de "confirmar antiword"
+  del Pendiente pasa de "el paso de instalación existe en el yml" a
+  "confirmado en una corrida real".
+
+## Ingesta completa de `ac` (2026-09-17, run 35162789588)
+
+Con el fix de commit-por-página ya en `main`, se relanzó la ingesta
+completa de `ac` vía `scraper-sfc.yml` (workflow_dispatch, iniciada
+2026-09-16T23:33 UTC, ~1h7m, status success). Verificado directo contra
+Neon (2026-09-18): `documentos_sfc` tiene **3.392 registros**, todos
+`tipo_documento='concepto'` (= `ac`) y todos con `embedding` no nulo;
+3.374 con `tiene_texto_completo=true`, 13 `descarga_fallida`, 5
+`sin_archivo`, cero `extraccion_fallida`/`formato_no_reconocido`. El
+catálogo reporta 3.431 registros totales para `ac` — la brecha de 39
+registros se investigó a fondo (ver siguiente sección): confirmada como
+deduplicación real por el índice único, con causa raíz identificada.
+
+## Investigación de la brecha `ac`: 3.431 (catálogo) vs 3.392 (BD) — 2026-09-18
+
+**Causa confirmada:** el censo completo de `numero_documento` tiene
+exactamente 39 valores duplicados (3.431 registros → 3.392 valores
+únicos), y el índice único `uq_documentos_sfc_tipo_numero` +
+`ON CONFLICT ... DO NOTHING` en `ingest_pilot.py` descarta en silencio
+el segundo insert de cada par — sin error, sin log, por diseño. Cero
+registros con `numero_documento` nulo/vacío, cero inserts fallidos sin
+reintentar en el log de la corrida (run 35162789588): el mecanismo es
+exactamente el índice único, no un bug de inserción.
+
+**De los 39 pares, no todos son el mismo documento.** Cruzando el
+`numero_documento` extraído del campo estructurado del catálogo contra
+el número citado dentro del texto del título de cada registro (ej.
+"Concepto No. 2008038350-001 del..."), y re-raspando el catálogo
+completo (3.431 registros, no solo los pares) para revisar el registro
+inmediatamente anterior de cada caso, aparece un **bug de captura del
+propio sitio de la SFC**: al cargar una entrada nueva, a veces queda
+copiado sin actualizar el valor de la entrada anterior — a veces en el
+campo estructurado `numero_documento`, a veces en la cita dentro del
+título — nunca en dirección constante. Esto se extendió más allá de
+los 39 pares: sobre los 3.431 registros completos hay **35 casos**
+donde campo y título no coinciden (27 no formaban parte de los 39
+pares originales, porque su `numero_documento` de campo no colisiona
+con ningún otro registro existente — el dato queda simplemente
+incorrecto, sin causar una fila duplicada visible).
+
+**Corrección aplicada:** 14 de esos casos se verificaron
+individualmente contra el registro anterior en el orden del catálogo
+(firma inequívoca: el campo corrupto coincide exactamente con el
+`numero_documento` del registro previo, o el mismo documento aparece
+una sola vez con el campo truncado/con un dígito mal tecleado) y se
+cargaron como una lista de excepciones puntual y hardcodeada —
+**no una heurística general** — en
+`CORRECCIONES_NUMERO_DOCUMENTO` (`ingest_pilot.py`; hoy 13 — una se
+retiró por no verificable, ver `94013223-2` abajo), aplicada por
+`(numero_documento, url_archivo)` justo antes del insert. Esto corrige
+el dato para una futura re-ingesta (no modifica retroactivamente los
+3.392 registros ya cargados en Neon — ver la sección siguiente para el
+backfill aplicado).
+
+**Casos conocidos sin corregir (requieren revisión manual, no forzados
+a ninguna regla automática):**
+- `2002028975-2` vs `2002028975-3` (concepto "Inversiones de las
+  entidades financieras"): un dígito de diferencia en el sufijo, sin
+  la firma de copia del registro vecino que confirma los otros 14 — no
+  hay forma de determinar automáticamente cuál valor es el correcto.
+- `2024096444-001` ("Contratos de uso de red" / "Habeas Data"): el
+  contenido del título para este registro fue inconsistente entre dos
+  raspados hechos la misma noche con minutos de diferencia — posible
+  inestabilidad de orden/paginación del catálogo en vivo entre
+  corridas, no solo un typo. Necesita re-verificación antes de decidir
+  cualquier corrección.
+- `94013223-2` (id 3319 en Neon): las tres fuentes disponibles no
+  concuerdan — el campo `numero_documento` dice 94013223-2 de mayo 8 de
+  **1994**, el título dice 97013223-2 de mayo 8 de **1997**, y el nombre
+  de archivo (`97401323.doc`) no coincide con ninguno de los dos. El
+  archivo da 404 desde la ingesta original (`descarga_fallida`), así que
+  no hay forma de verificarlo contra el documento real. Estuvo en
+  `CORRECCIONES_NUMERO_DOCUMENTO` como `→ 97013223 - 2`, pero se retiró
+  (2026-09-29) sin haberse aplicado nunca en Neon: una futura re-ingesta
+  habría insertado una fila nueva con el número corregido junto a la
+  existente (id 3319, con el número original), duplicando el documento.
+- `"Concepto interno"`: dos (o más) conceptos internos genuinamente
+  distintos comparten literalmente esta misma etiqueta genérica sin
+  número propio — no es un dato mal tecleado que se pueda "corregir" a
+  un número real; requeriría una estrategia de desambiguación distinta
+  (ej. una clave artificial) si se decide priorizarlo.
+- Quedan además casos dentro de los 39 pares originales que no se
+  revisaron en tanto detalle como los 14 corregidos ni como los 3
+  anteriores — la investigación se detuvo aquí deliberadamente: el
+  problema real afecta a lo sumo ~25-39 documentos de 3.431 (bien por
+  debajo del 1% del corpus `ac`), y no justificaba construir
+  heurísticas cada vez más específicas la misma noche.
+
+## Backfill de `CORRECCIONES_NUMERO_DOCUMENTO` en Neon (2026-09-22)
+
+Valores del diccionario normalizados al formato `N - N` (con espacios),
+igual que el resto de `numero_documento`. Antes de tocar Neon, **cada una
+de las 14 correcciones se re-verificó contra la fuente en vivo**, no solo
+contra la investigación del 2026-09-18: el número corregido debe aparecer
+en el título del registro en el catálogo `ac` en vivo **y** en el texto
+del documento original descargado. Resultado:
+
+- 13/14 verificadas por ambas vías.
+- `94013223 - 2 → 97013223 - 2` (id 3319) **excluida**: el documento da
+  404 (ya era `descarga_fallida` en la ingesta), el título dice
+  97013223-2 de mayo 8 de 1997, el campo dice 94013223-2 de mayo 8 de
+  1994 y el archivo se llama `97401323.doc` — no hay fuente que desempate.
+  No se aplicó en Neon y se retiró del diccionario (2026-09-29); ver
+  "Casos conocidos sin corregir".
+
+Las 13 verificadas no eran todas "faltantes" — dos casos distintos:
+- **7 ya estaban en Neon con el número corrupto** (ids 279, 1161, 1728,
+  1730, 1737, 2075, 2949): `UPDATE` de `numero_documento` con guarda
+  (`WHERE id=… AND numero_documento=<valor viejo>`), sin re-embeber.
+- **6 faltaban** (descartadas por `ON CONFLICT` al colisionar con el
+  registro vecino): insertadas con embedding (ids 3537-3542), raspando
+  solo su página del catálogo y bajando solo su archivo.
+
+Ojo para una futura re-ingesta completa con este diccionario: las filas
+que ya existían con el número corrupto hay que corregirlas con `UPDATE`,
+no re-insertarlas — el número corregido no colisiona con nada, así que
+`ON CONFLICT DO NOTHING` no lo frena y el documento quedaría duplicado.
+Estado final: 3.398 filas, 0 `numero_documento` duplicados, 0 embeddings
+nulos.
+
+**Hallazgo nuevo — la fecha también viene corrupta:** el bug de captura
+copia mal el campo completo "número del fecha" del catálogo, no solo el
+número. En 6 filas (1728 y las insertadas 3537-3541) `fecha_texto` no
+coincidía con la fecha del título ni del documento. **Corregidas en Neon
+(2026-09-22)** con la fecha del título (confirmada en el documento),
+con la misma guarda (`WHERE id=… AND fecha_texto=<valor viejo>`,
+exactamente una fila cada una):
+
+| id | numero_documento | fecha_texto corrupta | corregida |
+|---|---|---|---|
+| 1728 | 2008022419 - 001 | 3 de diciembre de 2008 | 29 de mayo de 2008 |
+| 3537 | 2011055880 - 001 | 24 de noviembre de 2011 | 2 de septiembre de 2011 |
+| 3538 | 2008063686 - 001 | 19 de septiembre de 2008 | 4 de noviembre de 2008 |
+| 3539 | 2008046316 - 001 | 8 de abril de 2008 | 10 de septiembre de 2008 |
+| 3540 | 2003038262 - 3 | 27 de julio de 2003 | 28 de agosto de 2003 |
+| 3541 | 2001079683 - 1 | 19 de febrero de 2002 | 29 de agosto de 2002 |
+
+Estas correcciones están solo en Neon: `ingest_pilot.py` no corrige
+fechas, así que una re-ingesta que re-inserte estos registros volvería a
+traer la fecha corrupta del catálogo.
+
+**Probablemente hay más filas con `fecha_texto` incorrecta.** El mismo
+bug (campo completo copiado mal del registro vecino) puede afectar la
+fecha de registros cuyo número quedó bien — esos no aparecieron en la
+investigación de la brecha, que solo comparó números (campo vs. título).
+Las 6 de arriba son solo las que salieron por estar entre las 14
+correcciones de número. Un censo completo de `fecha_texto` contra la
+fecha citada en el título, sobre los 3.431 registros de `ac`, queda
+**pendiente para otra sesión**.
+
+## Pendiente antes de escalar a las ~750 páginas totales (`af`/`aj`)
+
+- `ac` ya está completo — no pendiente. Backfill de
+  `CORRECCIONES_NUMERO_DOCUMENTO` aplicado (ver sección anterior). La
+  única corrección no verificable (`94013223 - 2`, id 3319) se retiró del
+  diccionario y quedó en "Casos conocidos sin corregir".
+- Censo completo de `fecha_texto` vs. fecha del título en `ac`
+  (pendiente para otra sesión): las 6 filas conocidas ya se corrigieron,
+  pero el mismo bug de captura puede afectar otras que no se revisaron —
+  ver sección "Backfill de `CORRECCIONES_NUMERO_DOCUMENTO`".
 - Decidir throttling final (`--pausa`, por defecto 1s/página) para no
-  saturar el sitio en una corrida de producción.
-- Confirmar que `antiword` esté disponible en el entorno de producción
-  (ver nota de dependencia arriba) o aceptar la degradación silenciosa
-  para `doc_ole`.
+  saturar el sitio en una corrida de producción a mayor escala.
 - Extender el censo de formatos a `af`/`aj` (por ahora solo se censó
-  `ac`) antes de ingerir texto completo de esas dos colecciones.
+  `ac`) antes de ingerir texto completo de esas dos colecciones. El
+  mismo bug de captura de `numero_documento` (ver sección anterior)
+  probablemente también afecta a `af`/`aj` — conviene tenerlo presente
+  al revisar sus censos, aunque no se investigó ahí todavía.
+- Casos ambiguos de `ac` sin corregir (ver sección anterior): revisión
+  manual pendiente, sin urgencia (<1% del corpus).
 
 ## Cómo seguir
 

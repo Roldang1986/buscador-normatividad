@@ -7,8 +7,17 @@ from sqlalchemy.orm import Session
 from app import agent
 from app.database import get_db
 from app.embeddings import embed_document
-from app.models import Norma
-from app.schemas import ConsultaRequest, ConsultaResponse, DiscusionResponse, NormaCreate, NormaRead
+from app.models import DocumentoSFC, Norma, NormaCBF
+from app.schemas import (
+    ConsultaRequest,
+    ConsultaResponse,
+    ConsultaSFCResponse,
+    DiscusionResponse,
+    DocumentoSFCRead,
+    NormaCBFRead,
+    NormaCreate,
+    NormaRead,
+)
 
 app = FastAPI(
     title="Buscador de Normatividad Tributaria",
@@ -74,6 +83,36 @@ def obtener_norma(norma_id: int, db: Session = Depends(get_db)) -> Norma:
     fuente citada, ya que FuenteCitada (la respuesta de /consulta) no
     trae el texto completo, solo metadata."""
     norma = db.get(Norma, norma_id)
+    if norma is None:
+        raise HTTPException(status_code=404, detail="Norma no encontrada")
+    return norma
+
+
+@app.post("/consulta-sfc", response_model=ConsultaSFCResponse)
+def consultar_sfc(payload: ConsultaRequest, db: Session = Depends(get_db)) -> ConsultaSFCResponse:
+    """Corpus SFC (Circular Básica Financiera + doctrina y jurisprudencia) —
+    endpoint separado de /consulta a propósito: el corpus tributario queda
+    intocado mientras este sigue en construcción (ver app/agent.py: responder_pregunta_sfc)."""
+    resultado = agent.responder_pregunta_sfc(db, payload.pregunta)
+    return ConsultaSFCResponse(**resultado)
+
+
+@app.get("/documento-sfc/{documento_id}", response_model=DocumentoSFCRead)
+def obtener_documento_sfc(documento_id: int, db: Session = Depends(get_db)) -> DocumentoSFC:
+    """Equivalente SFC de /norma/{id}: texto completo para el botón "Ver
+    texto completo" del lado SFC del frontend."""
+    documento = db.get(DocumentoSFC, documento_id)
+    if documento is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    return documento
+
+
+@app.get("/norma-cbf/{norma_id}", response_model=NormaCBFRead)
+def obtener_norma_cbf(norma_id: int, db: Session = Depends(get_db)) -> NormaCBF:
+    """Texto completo de un fragmento de la Circular Básica Financiera, para
+    el botón "Ver texto completo" de las fuentes con origen normas_cbf que
+    devuelve /consulta-sfc."""
+    norma = db.get(NormaCBF, norma_id)
     if norma is None:
         raise HTTPException(status_code=404, detail="Norma no encontrada")
     return norma

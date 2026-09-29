@@ -1,4 +1,58 @@
-/* Reset mínimo — la pasada de diseño real queda para después del scaffolding. */
+/* Tokens del tema "panel financiero" (oscuro, azul marino) — paleta
+   aprobada, opción A. Todo color del frontend sale de aquí. */
+
+:root {
+  color-scheme: dark;
+
+  /* Superficies */
+  --color-bg: #0c2340;
+  --color-surface: rgba(255, 255, 255, 0.04);
+  --color-surface-raised: #12305a;
+
+  /* Texto */
+  --color-text-primary: #e6edf6;
+  --color-text-secondary: #9fb3cc;
+  --color-link: #6fb0ee;
+
+  /* Bordes */
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-border-strong: rgba(255, 255, 255, 0.22);
+  --color-focus: #6fb0ee;
+
+  /* Badge activo (corpus seleccionado, botón primario) */
+  --color-badge-active-bg: #378add;
+  --color-badge-active-hover: #4a97e3;
+  --color-badge-active-text: #061529;
+
+  /* Badge inactivo (semitransparente) */
+  --color-badge-inactive-bg: rgba(55, 138, 221, 0.16);
+  --color-badge-inactive-border: rgba(55, 138, 221, 0.35);
+  --color-badge-inactive-text: #9cc6f0;
+
+  /* Estado: alerta (derogado, modificado, vigencia futura/condicionada) */
+  --color-danger: #ff8a8a;
+  --color-danger-bg: rgba(255, 107, 107, 0.14);
+  --color-danger-bd: rgba(255, 107, 107, 0.45);
+
+  /* Estado: éxito (vigente) */
+  --color-success: #6fd99b;
+  --color-success-bg: rgba(63, 191, 127, 0.14);
+  --color-success-bd: rgba(63, 191, 127, 0.4);
+
+  /* Tipografía condensada y densa */
+  --font-sans: "IBM Plex Sans Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+  --font-size-base: 0.9375rem;
+  --font-size-sm: 0.8125rem;
+  --line-height: 1.45;
+
+  /* Espaciado y radios */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --radius-card: 6px;
+  --radius-badge: 999px;
+}
 
 * {
   box-sizing: border-box;
@@ -6,4 +60,42 @@
 
 body {
   margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  margin: 0;
+}
+
+a {
+  color: var(--color-link);
+}
+
+button,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }

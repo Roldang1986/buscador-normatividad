@@ -25,11 +25,12 @@ export function useHistorial() {
     }
   }, [historial]);
 
-  const agregar = useCallback((pregunta, resultado) => {
+  const agregar = useCallback((pregunta, resultado, corpus = "tributario") => {
     const entrada = {
       id: crypto.randomUUID(),
       pregunta,
       resultado,
+      corpus,
       fecha: new Date().toISOString(),
     };
     setHistorial((actual) => [entrada, ...actual].slice(0, MAX_ENTRADAS));

@@ -6,3 +6,6 @@ venv/
 .env
 .DS_Store
 *.log
+
+# Capturas locales del rediseño (no se versionan)
+capturas-rediseno/
