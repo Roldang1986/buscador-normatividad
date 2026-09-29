@@ -172,6 +172,21 @@ LIMITACION_TRANSICION_CBF = (
     "con lo que sí está indexado."
 )
 
+# Advertencia permanente de la CBJ: más fuerte que la de la CBF porque no es
+# condicional. Verificado en vivo (2026-09-29): la fuente de la CBJ puede traer
+# ya incorporado texto de circulares que aún no rigen, sin nota ni marca
+# alguna (ej. CE 008 de 2026, subnumerales 2.2.5/2.4/2.5, que rigen el
+# 30-oct-2026). Por eso va en TODA respuesta que cite la CBJ, no solo cuando
+# un fragmento traiga nota de vigencia. Además de la regla del prompt,
+# `_asegurar_advertencia_cbj` la antepone en código si el modelo la omite.
+ADVERTENCIA_VIGENCIA_CBJ = (
+    "El texto de la Circular Básica Jurídica puede incluir modificaciones "
+    "recientes que aún no han entrado en vigencia, sin ninguna marca que lo "
+    "indique en la fuente. Para decisiones donde la fecha exacta de vigencia "
+    "sea crítica, verifica directamente contra las circulares externas más "
+    "recientes de la SFC."
+)
+
 SYSTEM_PROMPT_SFC = f"""Eres un asistente experto en regulación, doctrina y
 jurisprudencia de la Superintendencia Financiera de Colombia (SFC). Respondes
 ÚNICAMENTE con base en los fragmentos entregados como contexto en cada mensaje
@@ -239,6 +254,12 @@ Reglas estrictas:
    con conocimiento propio más allá de eso.
 8. Al final de la respuesta, incluye la línea de fuente_atribucion de los
    fragmentos citados de documentos_sfc, tal como aparece en el fragmento.
+9. Si citas CUALQUIER fragmento de origen "normas_cbj" (Circular Básica
+   Jurídica), empieza la respuesta con esta advertencia, textual y sin
+   condiciones: "{ADVERTENCIA_VIGENCIA_CBJ}" Inclúyela siempre, aunque el
+   fragmento no traiga nota_vigencia ni un estado_vigencia distinto de
+   "vigente": en la CBJ puede haber cambios aún no vigentes sin ninguna nota.
+   (La CBJ todavía no está indexada; esta regla rige desde que lo esté.)
 """
 
 
@@ -393,6 +414,16 @@ def _completar_fragmentos_citados(
     return resultado
 
 
+def _asegurar_advertencia_cbj(respuesta: str, fuentes: list[dict]) -> str:
+    """Antepone ADVERTENCIA_VIGENCIA_CBJ si alguna fuente citada es de la CBJ
+    y el modelo no la incluyó textualmente (regla 9 del prompt). Garantía en
+    código: la advertencia no puede depender de que el modelo la recuerde."""
+    cita_cbj = any(f.get("origen") == "normas_cbj" for f in fuentes)
+    if not cita_cbj or ADVERTENCIA_VIGENCIA_CBJ in respuesta:
+        return respuesta
+    return f"{ADVERTENCIA_VIGENCIA_CBJ}\n\n{respuesta}"
+
+
 def responder_pregunta_sfc(db: Session, pregunta: str) -> dict:
     """Punto de entrada del agente RAG para el corpus SFC: busca por separado
     en normas_cbf (norma vigente) y documentos_sfc (doctrina) con el mismo
@@ -443,5 +474,6 @@ def responder_pregunta_sfc(db: Session, pregunta: str) -> dict:
         resultado.respuesta, fragmentos, resultado.fragmentos_citados
     )
     fuentes = [_fuente_dict_sfc(fragmentos[i - 1]) for i in citados]
+    respuesta = _asegurar_advertencia_cbj(resultado.respuesta, fuentes)
 
-    return {"respuesta": resultado.respuesta, "fuentes": fuentes}
+    return {"respuesta": respuesta, "fuentes": fuentes}
