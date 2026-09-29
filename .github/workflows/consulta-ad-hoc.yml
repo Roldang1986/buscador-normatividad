@@ -18,14 +18,10 @@ on:
         type: boolean
         default: false
       aplicar_captura_nota_vigencia:
-        description: "MODO DE ESCRITURA: corre scripts/aplicar_captura_nota_vigencia.py, que SÍ escribe nota_vigencia (combinando si ya había texto, nunca sobrescribiendo) para las ~3231 filas encontradas. No toca estado_vigencia. Requiere aplicar_captura_nota_vigencia_confirmar='APLICAR' — si no coincide exactamente, el paso se omite sin escribir nada."
+        description: "MODO DE ESCRITURA: corre scripts/aplicar_captura_nota_vigencia.py, que SÍ escribe nota_vigencia (combinando si ya había texto, nunca sobrescribiendo) para las ~3231 filas encontradas. No toca estado_vigencia. Requiere confirmar_escritura='APLICAR' — si no coincide exactamente, el paso se omite sin escribir nada."
         required: false
         type: boolean
         default: false
-      aplicar_captura_nota_vigencia_confirmar:
-        description: "Debe ser exactamente 'APLICAR' (mayúsculas) para que aplicar_captura_nota_vigencia realmente escriba en la BD — verificación de seguridad, no una confirmación real de respaldo en Neon."
-        required: false
-        default: ""
       proponer_captura_nota_vigencia_ids:
         description: "id(s) puntuales separados por espacio para la Parte 4 de proponer_captura_nota_vigencia.py (ej. '2240 289 18551'). Si se deja vacío, usa las primeras N filas por defecto."
         required: false
@@ -35,6 +31,20 @@ on:
         required: false
         type: boolean
         default: false
+      aplicar_estado_sustituido_a_modificado:
+        description: "MODO DE ESCRITURA: corre scripts/aplicar_estado_sustituido_a_modificado.py — pone estado_vigencia='modificado' SOLO en las filas 'sustituido' cuyas notas confirman el patrón de reemplazo total de texto (437 de 468). Requiere confirmar_escritura='APLICAR'."
+        required: false
+        type: boolean
+        default: false
+      aplicar_estado_condicionalmente_a_condicionado:
+        description: "MODO DE ESCRITURA: corre scripts/aplicar_estado_condicionalmente_a_condicionado.py — pone estado_vigencia='condicionado' (valor nuevo) SOLO en las filas 'condicionalmente exequible' que hoy son 'vigente' (62 de 88). Requiere confirmar_escritura='APLICAR'."
+        required: false
+        type: boolean
+        default: false
+      confirmar_escritura:
+        description: "Debe ser exactamente 'APLICAR' (mayúsculas) para que cualquiera de los pasos de MODO DE ESCRITURA realmente escriba en la BD — verificación de seguridad, no una confirmación real de respaldo en Neon."
+        required: false
+        default: ""
 
 jobs:
   consulta:
@@ -57,7 +67,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Consulta ad hoc
-        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.proponer_captura_nota_vigencia != 'true' && github.event.inputs.aplicar_captura_nota_vigencia != 'true' && github.event.inputs.verificar_sustituido_condicionalmente != 'true' }}
+        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.proponer_captura_nota_vigencia != 'true' && github.event.inputs.aplicar_captura_nota_vigencia != 'true' && github.event.inputs.verificar_sustituido_condicionalmente != 'true' && github.event.inputs.aplicar_estado_sustituido_a_modificado != 'true' && github.event.inputs.aplicar_estado_condicionalmente_a_condicionado != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           PREGUNTA: ${{ github.event.inputs.pregunta }}
@@ -82,7 +92,7 @@ jobs:
           fi
 
       - name: Aplicar captura de nota_vigencia (MODO DE ESCRITURA, con BD)
-        if: ${{ github.event.inputs.aplicar_captura_nota_vigencia == 'true' && github.event.inputs.aplicar_captura_nota_vigencia_confirmar == 'APLICAR' }}
+        if: ${{ github.event.inputs.aplicar_captura_nota_vigencia == 'true' && github.event.inputs.confirmar_escritura == 'APLICAR' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/aplicar_captura_nota_vigencia.py
@@ -92,3 +102,15 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/verificar_sustituido_y_condicionalmente.py
+
+      - name: Aplicar estado_vigencia=modificado a sustituido confirmado (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.aplicar_estado_sustituido_a_modificado == 'true' && github.event.inputs.confirmar_escritura == 'APLICAR' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/aplicar_estado_sustituido_a_modificado.py
+
+      - name: Aplicar estado_vigencia=condicionado a condicionalmente-vigente (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.aplicar_estado_condicionalmente_a_condicionado == 'true' && github.event.inputs.confirmar_escritura == 'APLICAR' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/aplicar_estado_condicionalmente_a_condicionado.py

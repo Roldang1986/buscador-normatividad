@@ -108,6 +108,51 @@ def encontrar_filas_afectadas(db: Session) -> dict[int, tuple[Norma, list[str]]]
     return afectadas
 
 
+# Mismo patrón de cola que ya usa VIGENCIA_RE para asumir "modificado":
+# un reemplazo total de texto termina en "...el nuevo texto es el
+# siguiente:" antes del cierre del bracket. Confirmado con evidencia
+# real (scripts/verificar_sustituido_y_condicionalmente.py): 437 de 468
+# filas "sustituido" cumplen esto en TODAS sus notas; las 31 restantes
+# tienen variantes reales y distintas (formularios/anexos/capítulos
+# sustituidos sin esa cola, y al menos una — "el texto vigente HASTA
+# esta fecha es el siguiente:" — con significado invertido: el cuerpo
+# mostrado es el texto YA SUPERADO, no el nuevo) — se excluyen a
+# propósito de la reclasificación automática.
+RE_COLA_NUEVO_TEXTO = re.compile(r"nuevo texto es el siguiente:?\s*$", re.IGNORECASE)
+
+
+def filas_sustituido_seguras(filas_afectadas: dict[int, tuple[Norma, list[str]]]) -> list[Norma]:
+    """Filas 'sustituido' donde TODAS sus notas de esa categoría
+    confirman el patrón de reemplazo total de texto — candidatas
+    seguras a estado_vigencia='modificado', igual que ya se trata a las
+    notas 'modificado' de VIGENCIA_RE (que también mezclan artículo
+    completo/inciso/numeral bajo un solo estado)."""
+    seguras = []
+    for norma, notas in filas_afectadas.values():
+        notas_sustituido = [n for n in notas if re.search(r"sustituid[oa]", n, re.IGNORECASE)]
+        if notas_sustituido and all(RE_COLA_NUEVO_TEXTO.search(n) for n in notas_sustituido):
+            seguras.append(norma)
+    return seguras
+
+
+def filas_condicionalmente_vigente(filas_afectadas: dict[int, tuple[Norma, list[str]]]) -> list[Norma]:
+    """Filas 'condicionalmente exequible' cuyo estado_vigencia actual es
+    'vigente' — únicas candidatas seguras a un estado nuevo
+    ('condicionado'). Se excluyen a propósito las que ya son
+    'modificado' (para no perder esa señal, más operativa, con una
+    reclasificación) o 'derogado' (donde 'condicionalmente exequible'
+    convive con una nota de inexequibilidad/derogación parcial real —
+    ver id=5767 en la verificación: 'Literal CONDICIONALMENTE exequible.
+    Aparte tachado INEXEQUIBLE' — bajarlo a 'condicionado' ocultaría que
+    una parte SÍ fue anulada)."""
+    return [
+        norma
+        for norma, notas in filas_afectadas.values()
+        if norma.estado_vigencia == "vigente"
+        and any(re.search(r"condicionalmente\s+exequible", n, re.IGNORECASE) for n in notas)
+    ]
+
+
 def calcular_nota_final(nota_actual: str | None, notas_nuevas: list[str]) -> str:
     """Combina nota_actual (puede ser None/"") con notas_nuevas, sin
     duplicar una nota que ya esté presente textualmente (idempotente
