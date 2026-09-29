@@ -60,7 +60,6 @@ CORRECCIONES_NUMERO_DOCUMENTO: dict[tuple[str, str], str] = {
     ("2008066040 - 00", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2008/2008066040.pdf"): "2008066040 - 001",
     ("2007000231 - 00", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/Conceptos2007/2007000231.pdf"): "2007000231 - 001",
     ("999039821 - 2", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/doctrinas1999/evaluacioncartera0069.htm"): "1999039821 - 2",
-    ("94013223 - 2", "https://www.superfinanciera.gov.co/loader.php?lServicio=Tools2&lTipo=descargas&lFuncion=downloadSFCant&file=/Normativa/doctrinas1994-8/97401323.doc"): "97013223 - 2",
 }
 
 # Límite de caracteres del texto completo dentro del input de embedding,

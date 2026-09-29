@@ -192,7 +192,8 @@ individualmente contra el registro anterior en el orden del catálogo
 una sola vez con el campo truncado/con un dígito mal tecleado) y se
 cargaron como una lista de excepciones puntual y hardcodeada —
 **no una heurística general** — en
-`CORRECCIONES_NUMERO_DOCUMENTO` (`ingest_pilot.py`), aplicada por
+`CORRECCIONES_NUMERO_DOCUMENTO` (`ingest_pilot.py`; hoy 13 — una se
+retiró por no verificable, ver `94013223-2` abajo), aplicada por
 `(numero_documento, url_archivo)` justo antes del insert. Esto corrige
 el dato para una futura re-ingesta (no modifica retroactivamente los
 3.392 registros ya cargados en Neon — ver la sección siguiente para el
@@ -210,6 +211,16 @@ a ninguna regla automática):**
   inestabilidad de orden/paginación del catálogo en vivo entre
   corridas, no solo un typo. Necesita re-verificación antes de decidir
   cualquier corrección.
+- `94013223-2` (id 3319 en Neon): las tres fuentes disponibles no
+  concuerdan — el campo `numero_documento` dice 94013223-2 de mayo 8 de
+  **1994**, el título dice 97013223-2 de mayo 8 de **1997**, y el nombre
+  de archivo (`97401323.doc`) no coincide con ninguno de los dos. El
+  archivo da 404 desde la ingesta original (`descarga_fallida`), así que
+  no hay forma de verificarlo contra el documento real. Estuvo en
+  `CORRECCIONES_NUMERO_DOCUMENTO` como `→ 97013223 - 2`, pero se retiró
+  (2026-09-29) sin haberse aplicado nunca en Neon: una futura re-ingesta
+  habría insertado una fila nueva con el número corregido junto a la
+  existente (id 3319, con el número original), duplicando el documento.
 - `"Concepto interno"`: dos (o más) conceptos internos genuinamente
   distintos comparten literalmente esta misma etiqueta genérica sin
   número propio — no es un dato mal tecleado que se pueda "corregir" a
@@ -236,7 +247,8 @@ del documento original descargado. Resultado:
   404 (ya era `descarga_fallida` en la ingesta), el título dice
   97013223-2 de mayo 8 de 1997, el campo dice 94013223-2 de mayo 8 de
   1994 y el archivo se llama `97401323.doc` — no hay fuente que desempate.
-  Queda en el diccionario pero no se aplicó en Neon; revisión manual.
+  No se aplicó en Neon y se retiró del diccionario (2026-09-29); ver
+  "Casos conocidos sin corregir".
 
 Las 13 verificadas no eran todas "faltantes" — dos casos distintos:
 - **7 ya estaban en Neon con el número corrupto** (ids 279, 1161, 1728,
@@ -286,8 +298,9 @@ fecha citada en el título, sobre los 3.431 registros de `ac`, queda
 ## Pendiente antes de escalar a las ~750 páginas totales (`af`/`aj`)
 
 - `ac` ya está completo — no pendiente. Backfill de
-  `CORRECCIONES_NUMERO_DOCUMENTO` aplicado (ver sección anterior), salvo
-  `94013223 - 2` (id 3319), no verificable contra la fuente.
+  `CORRECCIONES_NUMERO_DOCUMENTO` aplicado (ver sección anterior). La
+  única corrección no verificable (`94013223 - 2`, id 3319) se retiró del
+  diccionario y quedó en "Casos conocidos sin corregir".
 - Censo completo de `fecha_texto` vs. fecha del título en `ac`
   (pendiente para otra sesión): las 6 filas conocidas ya se corrigieron,
   pero el mismo bug de captura puede afectar otras que no se revisaron —
