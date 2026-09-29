@@ -62,7 +62,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app__encabezado">
-        <h1>Buscador de Normatividad Tributaria</h1>
+        <h1>Buscador de Normatividad</h1>
         <button type="button" onClick={() => setHistorialAbierto((abierto) => !abierto)}>
           Historial ({historial.length})
         </button>

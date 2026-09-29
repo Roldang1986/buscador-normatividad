@@ -1,113 +1,235 @@
-/* Estilos mínimos de layout — pendiente pasada de diseño real. */
+/* Tema "panel financiero" — todos los colores vienen de los tokens de index.css. */
 
 .app {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
-  padding: 1rem;
-  font-family: system-ui, sans-serif;
+  padding: var(--space-4);
+}
+
+/* Botón secundario por defecto; el primario y los badges lo sobreescriben. */
+.app button {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.app button:hover:not(:disabled) {
+  background: var(--color-surface);
+  border-color: var(--color-badge-inactive-border);
 }
 
 .app__encabezado {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app__encabezado h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.app__encabezado button {
+  flex-shrink: 0;
 }
 
 .app__error {
-  color: #b00020;
+  color: var(--color-danger);
 }
+
+.app__cargando {
+  color: var(--color-text-secondary);
+}
+
+/* Selector de corpus: badge sólido = activo, semitransparente = inactivo. */
 
 .selector-corpus {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
 
-.selector-corpus__boton {
-  font: inherit;
-  padding: 0.4rem 0.8rem;
-  border: 1px solid #ccc;
-  border-radius: 999px;
-  background: #fff;
-  cursor: pointer;
+.app .selector-corpus__boton {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-badge-inactive-border);
+  border-radius: var(--radius-badge);
+  background: var(--color-badge-inactive-bg);
+  color: var(--color-badge-inactive-text);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.selector-corpus__boton--activo {
-  background: #222;
-  color: #fff;
-  border-color: #222;
+.app .selector-corpus__boton:hover:not(:disabled) {
+  background: var(--color-badge-inactive-bg);
+  border-color: var(--color-badge-active-bg);
 }
+
+.app .selector-corpus__boton--activo,
+.app .selector-corpus__boton--activo:hover:not(:disabled) {
+  background: var(--color-badge-active-bg);
+  border-color: var(--color-badge-active-bg);
+  color: var(--color-badge-active-text);
+  font-weight: 600;
+}
+
+.selector-corpus__etiqueta-corta {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .selector-corpus__etiqueta-larga {
+    display: none;
+  }
+
+  .selector-corpus__etiqueta-corta {
+    display: inline;
+  }
+}
+
+/* Caja de pregunta */
 
 .caja-pregunta {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin: 1rem 0;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
 }
 
 .caja-pregunta textarea {
-  font: inherit;
-  padding: 0.5rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  resize: vertical;
 }
 
+.caja-pregunta textarea::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.app .caja-pregunta button[type="submit"] {
+  align-self: flex-end;
+  padding: var(--space-2) var(--space-4);
+  border-color: var(--color-badge-active-bg);
+  background: var(--color-badge-active-bg);
+  color: var(--color-badge-active-text);
+  font-weight: 600;
+}
+
+.app .caja-pregunta button[type="submit"]:hover:not(:disabled) {
+  background: var(--color-badge-active-hover);
+  border-color: var(--color-badge-active-hover);
+}
+
+/* Respuesta y fuentes */
+
 .respuesta {
-  margin-top: 1rem;
+  margin-top: var(--space-4);
+}
+
+.respuesta__texto {
+  white-space: pre-wrap;
+}
+
+.respuesta__fuentes h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .respuesta__fuentes-lista {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-2);
 }
 
 .tarjeta-fuente {
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  padding: var(--space-2) var(--space-3);
 }
 
 .tarjeta-fuente--alerta {
-  border-color: #b00020;
+  border-color: var(--color-danger-bd);
 }
 
 .tarjeta-fuente__encabezado {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.tarjeta-fuente__articulo {
+  font-weight: 600;
 }
 
 .tarjeta-fuente__estado {
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  background: #eee;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-badge-inactive-border);
+  border-radius: var(--radius-badge);
+  background: var(--color-badge-inactive-bg);
+  color: var(--color-badge-inactive-text);
+  font-size: var(--font-size-sm);
+}
+
+.tarjeta-fuente__estado--vigente {
+  border-color: var(--color-success-bd);
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .tarjeta-fuente__estado--modificado,
 .tarjeta-fuente__estado--derogado,
 .tarjeta-fuente__estado--vigencia_futura,
 .tarjeta-fuente__estado--vigencia_condicionada {
-  background: #fdecea;
-  color: #b00020;
-  font-weight: bold;
+  border-color: var(--color-danger-bd);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.tarjeta-fuente__nombre {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
 }
 
 .tarjeta-fuente__acciones {
   display: flex;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
 }
+
+/* Historial (panel lateral) */
 
 .historial {
   position: fixed;
   top: 0;
   right: 0;
-  width: 300px;
+  width: min(300px, 100vw);
   height: 100vh;
-  background: white;
-  border-left: 1px solid #ccc;
-  padding: 1rem;
+  background: var(--color-surface-raised);
+  border-left: 1px solid var(--color-border);
+  padding: var(--space-4);
   overflow-y: auto;
 }
 
@@ -117,12 +239,20 @@
   align-items: center;
 }
 
+.historial__encabezado h3 {
+  font-size: 1rem;
+}
+
+.historial__vacio {
+  color: var(--color-text-secondary);
+}
+
 .historial__lista {
   list-style: none;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .historial__lista button {
@@ -133,30 +263,48 @@
   text-overflow: ellipsis;
 }
 
+.app .historial__borrar {
+  border-color: var(--color-danger-bd);
+  color: var(--color-danger);
+}
+
+/* Modal de texto completo */
+
 .modal-fondo {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: var(--space-4);
 }
 
 .modal-contenido {
-  background: white;
-  border-radius: 8px;
-  padding: 1rem;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
   max-width: 640px;
   max-height: 80vh;
   overflow-y: auto;
   position: relative;
 }
 
+.modal-contenido h3 {
+  padding-right: 2rem;
+  font-size: 1.0625rem;
+}
+
 .modal-cerrar {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
+.modal-meta {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
 }
 
 .modal-texto {
@@ -165,5 +313,11 @@
 }
 
 .modal-error {
-  color: #b00020;
+  color: var(--color-danger);
+}
+
+@media (max-width: 480px) {
+  .app__encabezado h1 {
+    font-size: 1.0625rem;
+  }
 }

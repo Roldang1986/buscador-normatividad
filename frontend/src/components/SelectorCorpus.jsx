@@ -1,6 +1,10 @@
 const CORPUS = [
-  { id: "tributario", etiqueta: "Tributario" },
-  { id: "sfc", etiqueta: "SFC — Circular Básica Financiera y conceptos" },
+  { id: "tributario", etiqueta: "Tributario", etiquetaCorta: "Tributario" },
+  {
+    id: "sfc",
+    etiqueta: "SFC — Circular Básica Financiera y conceptos",
+    etiquetaCorta: "SFC · CBF y conceptos",
+  },
 ];
 
 export default function SelectorCorpus({ corpus, onCambiar, disabled }) {
@@ -18,7 +22,9 @@ export default function SelectorCorpus({ corpus, onCambiar, disabled }) {
           disabled={disabled}
           onClick={() => onCambiar(opcion.id)}
         >
-          {opcion.etiqueta}
+          {/* En móvil (≤480px) el CSS muestra solo la etiqueta corta. */}
+          <span className="selector-corpus__etiqueta-larga">{opcion.etiqueta}</span>
+          <span className="selector-corpus__etiqueta-corta">{opcion.etiquetaCorta}</span>
         </button>
       ))}
     </div>
