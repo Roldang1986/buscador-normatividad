@@ -12,6 +12,47 @@ on:
         required: false
         type: boolean
         default: false
+      modo:
+        description: "Endpoint a probar con 'pregunta' (ignorado si preguntas_control=true, que siempre corre contra /consulta)"
+        required: false
+        type: choice
+        options:
+          - consulta
+          - discutir
+        default: consulta
+      proponer_captura_nota_vigencia:
+        description: "Si se pasa, en vez de la pregunta suelta corre scripts/proponer_captura_nota_vigencia.py: dry-run de solo lectura que mide el alcance de capturar nota_vigencia para las notas 'compilado en'/'NO compilado en'/'tachado NULO'/'sustituido'/'condicionalmente exequible' y muestra ejemplos completos + una muestra antes/después. No escribe nada en la BD."
+        required: false
+        type: boolean
+        default: false
+      aplicar_captura_nota_vigencia:
+        description: "MODO DE ESCRITURA: corre scripts/aplicar_captura_nota_vigencia.py, que SÍ escribe nota_vigencia (combinando si ya había texto, nunca sobrescribiendo) para las ~3231 filas encontradas. No toca estado_vigencia. Requiere confirmar_escritura='APLICAR' — si no coincide exactamente, el paso se omite sin escribir nada."
+        required: false
+        type: boolean
+        default: false
+      proponer_captura_nota_vigencia_ids:
+        description: "id(s) puntuales separados por espacio para la Parte 4 de proponer_captura_nota_vigencia.py (ej. '2240 289 18551'). Si se deja vacío, usa las primeras N filas por defecto."
+        required: false
+        default: ""
+      verificar_sustituido_condicionalmente:
+        description: "Si se pasa, corre scripts/verificar_sustituido_y_condicionalmente.py: solo lectura, verifica el patrón real de las notas 'sustituido' (¿reemplazo total de texto, como 'modificado'?) y cuenta/muestra las filas 'condicionalmente exequible'. No escribe nada."
+        required: false
+        type: boolean
+        default: false
+      aplicar_estado_sustituido_a_modificado:
+        description: "MODO DE ESCRITURA: corre scripts/aplicar_estado_sustituido_a_modificado.py — pone estado_vigencia='modificado' SOLO en las filas 'sustituido' cuyas notas confirman el patrón de reemplazo total de texto (437 de 468). Requiere confirmar_escritura='APLICAR'."
+        required: false
+        type: boolean
+        default: false
+      aplicar_estado_condicionalmente_a_condicionado:
+        description: "MODO DE ESCRITURA: corre scripts/aplicar_estado_condicionalmente_a_condicionado.py — pone estado_vigencia='condicionado' (valor nuevo) SOLO en las filas 'condicionalmente exequible' que hoy son 'vigente' (62 de 88). Requiere confirmar_escritura='APLICAR'."
+        required: false
+        type: boolean
+        default: false
+      confirmar_escritura:
+        description: "Debe ser exactamente 'APLICAR' (mayúsculas) para que cualquiera de los pasos de MODO DE ESCRITURA realmente escriba en la BD — verificación de seguridad, no una confirmación real de respaldo en Neon."
+        required: false
+        default: ""
 
 jobs:
   consulta:
@@ -33,15 +74,58 @@ jobs:
       - name: Correr migraciones (alembic upgrade head)
         run: alembic upgrade head
 
-      - name: Consulta ad hoc
-        if: ${{ github.event.inputs.preguntas_control != 'true' }}
+      - name: Consulta ad hoc (POST /consulta)
+        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.modo != 'discutir' && github.event.inputs.proponer_captura_nota_vigencia != 'true' && github.event.inputs.aplicar_captura_nota_vigencia != 'true' && github.event.inputs.verificar_sustituido_condicionalmente != 'true' && github.event.inputs.aplicar_estado_sustituido_a_modificado != 'true' && github.event.inputs.aplicar_estado_condicionalmente_a_condicionado != 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
           PREGUNTA: ${{ github.event.inputs.pregunta }}
         run: python scripts/consulta_ad_hoc.py "$PREGUNTA"
+
+      - name: Discutir ad hoc (POST /discutir)
+        if: ${{ github.event.inputs.preguntas_control != 'true' && github.event.inputs.modo == 'discutir' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PREGUNTA: ${{ github.event.inputs.pregunta }}
+        run: python scripts/discutir_ad_hoc.py "$PREGUNTA"
 
       - name: Verificar preguntas de control (solo lectura, con BD)
         if: ${{ github.event.inputs.preguntas_control == 'true' }}
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/verificar_preguntas_control.py
+
+      - name: Proponer captura de nota_vigencia (DRY RUN, solo lectura, con BD)
+        if: ${{ github.event.inputs.proponer_captura_nota_vigencia == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          IDS: ${{ github.event.inputs.proponer_captura_nota_vigencia_ids }}
+        run: |
+          if [ -n "$IDS" ]; then
+            python scripts/proponer_captura_nota_vigencia.py --ids "$IDS"
+          else
+            python scripts/proponer_captura_nota_vigencia.py
+          fi
+
+      - name: Aplicar captura de nota_vigencia (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.aplicar_captura_nota_vigencia == 'true' && github.event.inputs.confirmar_escritura == 'APLICAR' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/aplicar_captura_nota_vigencia.py
+
+      - name: Verificar patrón sustituido y condicionalmente exequible (solo lectura, con BD)
+        if: ${{ github.event.inputs.verificar_sustituido_condicionalmente == 'true' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/verificar_sustituido_y_condicionalmente.py
+
+      - name: Aplicar estado_vigencia=modificado a sustituido confirmado (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.aplicar_estado_sustituido_a_modificado == 'true' && github.event.inputs.confirmar_escritura == 'APLICAR' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/aplicar_estado_sustituido_a_modificado.py
+
+      - name: Aplicar estado_vigencia=condicionado a condicionalmente-vigente (MODO DE ESCRITURA, con BD)
+        if: ${{ github.event.inputs.aplicar_estado_condicionalmente_a_condicionado == 'true' && github.event.inputs.confirmar_escritura == 'APLICAR' }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/aplicar_estado_condicionalmente_a_condicionado.py
