@@ -70,7 +70,7 @@ export default function App() {
 
       <main className="app__principal">
         <SelectorCorpus corpus={corpus} onCambiar={manejarCambioCorpus} disabled={cargando} />
-        <CajaPregunta onEnviar={manejarConsulta} cargando={cargando} />
+        <CajaPregunta corpus={corpus} onEnviar={manejarConsulta} cargando={cargando} />
         {error && <p className="app__error">{error}</p>}
         {cargando && <p className="app__cargando">Buscando en la normatividad…</p>}
         <Respuesta

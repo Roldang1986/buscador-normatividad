@@ -1,6 +1,11 @@
 import { useState } from "react";
 
-export default function CajaPregunta({ onEnviar, cargando }) {
+const EJEMPLO_POR_CORPUS = {
+  tributario: "Ej. ¿Cuál es la tarifa general del IVA?",
+  sfc: "Ej. ¿Qué exige la CBF sobre el sistema de administración de riesgo de liquidez?",
+};
+
+export default function CajaPregunta({ corpus, onEnviar, cargando }) {
   const [pregunta, setPregunta] = useState("");
 
   function manejarEnvio(evento) {
@@ -15,7 +20,7 @@ export default function CajaPregunta({ onEnviar, cargando }) {
       <textarea
         value={pregunta}
         onChange={(evento) => setPregunta(evento.target.value)}
-        placeholder="Ej. ¿Cuál es la tarifa general del IVA?"
+        placeholder={EJEMPLO_POR_CORPUS[corpus]}
         rows={3}
         disabled={cargando}
       />
