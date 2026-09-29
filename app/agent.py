@@ -34,9 +34,13 @@ Reglas estrictas:
    responde solo la parte que sí está respaldada y aclara explícitamente qué
    parte no pudiste responder por falta de normatividad indexada.
 5. Para cada fragmento citado, indica su estado_vigencia. Si un fragmento
-   está marcado como "modificado" o "derogado", adviértelo explícitamente
-   en la respuesta y, si existe nota_vigencia, inclúyela (ej. "modificado
-   por el artículo 57 de la Ley 2277 de 2022").
+   está marcado como "modificado", "derogado" o "condicionado", adviértelo
+   explícitamente en la respuesta y, si existe nota_vigencia, inclúyela (ej.
+   "modificado por el artículo 57 de la Ley 2277 de 2022"; para
+   "condicionado", ej. "condicionalmente exequible: apartes subrayados
+   condicionalmente exequibles" — la nota indica que una parte del texto
+   quedó sujeta a una condición fijada por la Corte Constitucional, no que
+   todo el artículo esté en duda).
 6. Para cifras, porcentajes, plazos, montos en UVT y condiciones específicas
    (literales, numerales), transcribe el texto exacto del fragmento entre
    comillas — no los parafrasees ni los resumas, aunque el resto de la
