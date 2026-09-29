@@ -49,21 +49,32 @@ def main() -> None:
 
     con_cola_nuevo_texto = 0
     sin_cola_nuevo_texto = []
+    filas_solo_confirmadas = []
+    filas_con_alguna_no_confirmada = []
     for norma, notas_sustituido in filas_sustituido:
+        todas_confirmadas = True
         for nota in notas_sustituido:
             if RE_COLA_NUEVO_TEXTO.search(nota):
                 con_cola_nuevo_texto += 1
             else:
                 sin_cola_nuevo_texto.append((norma, nota))
+                todas_confirmadas = False
+        if todas_confirmadas:
+            filas_solo_confirmadas.append(norma)
+        else:
+            filas_con_alguna_no_confirmada.append(norma)
 
     total_notas_sustituido = sum(len(n) for _, n in filas_sustituido)
     print(f"Notas 'sustituido' que terminan en 'el nuevo texto es el siguiente:': {con_cola_nuevo_texto}")
     print(f"Notas 'sustituido' que NO terminan así (revisar manualmente): {len(sin_cola_nuevo_texto)}")
     print(f"Total de notas 'sustituido' (una fila puede tener más de una): {total_notas_sustituido}\n")
+    print(f"FILAS donde TODAS sus notas 'sustituido' confirman el patrón (candidatas seguras a 'modificado'): {len(filas_solo_confirmadas)}")
+    print(f"FILAS con AL MENOS UNA nota 'sustituido' que NO confirma el patrón (excluir de la reclasificación automática): {len(filas_con_alguna_no_confirmada)}\n")
 
     if sin_cola_nuevo_texto:
-        print("--- Notas 'sustituido' SIN la cola esperada (hasta 10) ---")
-        for norma, nota in sin_cola_nuevo_texto[:10]:
+        ids_no_confirmadas = sorted({n.id for n, _ in sin_cola_nuevo_texto})
+        print(f"--- TODAS las notas 'sustituido' SIN la cola esperada ({len(sin_cola_nuevo_texto)} notas, {len(ids_no_confirmadas)} filas distintas: {ids_no_confirmadas}) ---")
+        for norma, nota in sin_cola_nuevo_texto:
             print(f"  id={norma.id} fuente={norma.fuente!r}")
             print(f"    nota completa: {nota!r}")
         print()
